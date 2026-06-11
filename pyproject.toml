@@ -1,0 +1,27 @@
+[project]
+name = "financial-planner-agent"
+version = "0.1.0"
+description = "AI-powered financial planning agent with skill-based architecture"
+requires-python = ">=3.11"
+dependencies = [
+    "strands-agents>=0.1.0",
+    "strands-agents-tools>=0.1.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["strands-agents[anthropic]"]
+openai = ["strands-agents[openai]"]
+
+[project.scripts]
+agent-cli = "agent.main:run_cli"
+agent-server = "agent.server:app"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
