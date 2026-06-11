@@ -14,6 +14,7 @@ from agent.prompts import SYSTEM_PROMPT
 from agent.profile import create_sample_profile
 from agent.skills.cash_flow import TOOLS as CASH_FLOW_TOOLS
 from agent.skills.asset_location import TOOLS as ASSET_LOCATION_TOOLS
+from agent.skills.visualization import TOOLS as VISUALIZATION_TOOLS
 
 
 def _ensure_profile_exists() -> None:
@@ -33,6 +34,7 @@ def create_agent() -> Agent:
     all_tools = [
         *CASH_FLOW_TOOLS,
         *ASSET_LOCATION_TOOLS,
+        *VISUALIZATION_TOOLS,
     ]
 
     # Create the agent — defaults to Bedrock Claude Sonnet

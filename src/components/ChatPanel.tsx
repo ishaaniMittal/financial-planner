@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { VegaChart } from '@/components/VegaChart'
 import { Send, RotateCcw, Bot, User, Loader2 } from 'lucide-react'
 
 interface Message {
@@ -7,15 +8,16 @@ interface Message {
   role: 'user' | 'agent'
   content: string
   timestamp: Date
+  visualizations?: Record<string, unknown>[]
 }
 
 const SUGGESTED_QUESTIONS = [
   "Am I on pace to max all my accounts this year?",
   "Where should my next dollar go?",
-  "Is my asset location optimal?",
+  "Show me my asset location across accounts",
   "How much tax drag am I paying?",
-  "Do I have too much cash sitting idle?",
-  "What's my tax bracket and should I go Roth or Traditional?",
+  "Show me my portfolio breakdown",
+  "What does my monthly allocation trend look like?",
 ]
 
 export const ChatPanel: React.FC = () => {
@@ -23,7 +25,7 @@ export const ChatPanel: React.FC = () => {
     {
       id: 'welcome',
       role: 'agent',
-      content: "I'm your financial planning agent. I can analyze your cash flow allocation, check contribution limits, optimize asset location, and more. Ask me anything about your finances.",
+      content: "I'm your financial planning agent. I can analyze your cash flow, optimize asset location, and visualize your data with the best chart for each question. Try asking something below.",
       timestamp: new Date(),
     },
   ])
@@ -34,7 +36,6 @@ export const ChatPanel: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    // Check API health on mount
     fetch('http://localhost:8000/api/health')
       .then((res) => res.json())
       .then(() => setIsConnected(true))
@@ -77,11 +78,12 @@ export const ChatPanel: React.FC = () => {
         role: 'agent',
         content: data.response,
         timestamp: new Date(),
+        visualizations: data.visualizations?.length > 0 ? data.visualizations : undefined,
       }
 
       setMessages((prev) => [...prev, agentMessage])
       setIsConnected(true)
-    } catch (error) {
+    } catch {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'agent',
@@ -119,7 +121,7 @@ export const ChatPanel: React.FC = () => {
   }
 
   return (
-    <Card className="flex flex-col h-[600px]">
+    <Card className="flex flex-col h-[700px]">
       <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between space-y-0 pb-3">
         <div className="flex items-center gap-2">
           <CardTitle className="text-lg">Financial Advisor</CardTitle>
@@ -143,29 +145,37 @@ export const ChatPanel: React.FC = () => {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 space-y-4">
           {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              {msg.role === 'agent' && (
-                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary flex items-center justify-center">
-                  <Bot className="h-4 w-4 text-primary-foreground" />
+            <div key={msg.id} className="space-y-2">
+              <div className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {msg.role === 'agent' && (
+                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary flex items-center justify-center">
+                    <Bot className="h-4 w-4 text-primary-foreground" />
+                  </div>
+                )}
+                <div
+                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    msg.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-secondary-foreground'
+                  }`}
+                >
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                    {msg.content}
+                  </pre>
                 </div>
-              )}
-              <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary text-secondary-foreground'
-                }`}
-              >
-                <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                  {msg.content}
-                </pre>
+                {msg.role === 'user' && (
+                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
               </div>
-              {msg.role === 'user' && (
-                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
-                  <User className="h-4 w-4 text-muted-foreground" />
+
+              {/* Render visualizations inline below the message */}
+              {msg.visualizations && msg.visualizations.length > 0 && (
+                <div className="ml-10 space-y-2">
+                  {msg.visualizations.map((spec, idx) => (
+                    <VegaChart key={`${msg.id}-viz-${idx}`} spec={spec} />
+                  ))}
                 </div>
               )}
             </div>

@@ -16,7 +16,11 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.4.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "vega": "^5.30.0",
+    "vega-lite": "^5.19.0",
+    "vega-embed": "^6.25.0",
+    "react-vega": "^7.6.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

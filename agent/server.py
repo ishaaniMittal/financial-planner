@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 import json
+import re
 
 from agent.main import create_agent, _ensure_profile_exists
 from agent.profile import FinancialProfile
@@ -55,6 +56,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     tool_calls: list[str] = []
+    visualizations: list[dict] = []
 
 
 class HealthResponse(BaseModel):
@@ -85,9 +87,26 @@ def chat(request: ChatRequest):
 
     try:
         response = agent(request.message)
+        response_text = str(response)
+
+        # Extract vega-lite specs from the response
+        visualizations = []
+        vega_pattern = r"```vega-lite\n(.*?)```"
+        matches = re.findall(vega_pattern, response_text, re.DOTALL)
+        for match in matches:
+            try:
+                spec = json.loads(match.strip())
+                visualizations.append(spec)
+            except json.JSONDecodeError:
+                pass
+
+        # Clean the response text (remove the raw JSON blocks for cleaner display)
+        clean_text = re.sub(vega_pattern, "[Chart rendered below]", response_text, flags=re.DOTALL)
+
         return ChatResponse(
-            response=str(response),
-            tool_calls=[],  # Could extract from agent internals if needed
+            response=clean_text,
+            tool_calls=[],
+            visualizations=visualizations,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
