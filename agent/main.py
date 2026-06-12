@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from strands import Agent
+from strands.models.anthropic import AnthropicModel
 
 from agent.prompts import SYSTEM_PROMPT
 from agent.profile import create_sample_profile
@@ -37,9 +38,14 @@ def create_agent() -> Agent:
         *VISUALIZATION_TOOLS,
     ]
 
-    # Create the agent — defaults to Bedrock Claude Sonnet
-    # Override with environment variables if using a different provider
+    model = AnthropicModel(
+        model_id="claude-sonnet-4-6",
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        max_tokens=8096,
+    )
+
     agent = Agent(
+        model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=all_tools,
     )

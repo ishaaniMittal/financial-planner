@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import Markdown from 'react-markdown'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { VegaChart } from '@/components/VegaChart'
 import { Send, RotateCcw, Bot, User, Loader2 } from 'lucide-react'
@@ -198,9 +199,17 @@ export const ChatPanel: React.FC = () => {
                       : 'bg-secondary text-secondary-foreground'
                   }`}
                 >
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                    {msg.content}
-                  </pre>
+                  {msg.role === 'user' ? (
+                    <span className="leading-relaxed">{msg.content}</span>
+                  ) : (
+                    <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed
+                      [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
+                      [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
+                      [&_ul]:my-1 [&_ul]:pl-4 [&_li]:my-0.5
+                      [&_p]:my-1 [&_strong]:font-semibold">
+                      <Markdown>{msg.content}</Markdown>
+                    </div>
+                  )}
                 </div>
                 {msg.role === 'user' && (
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
