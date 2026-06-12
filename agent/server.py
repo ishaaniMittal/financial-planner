@@ -2,10 +2,13 @@
 FastAPI server — exposes the financial planning agent as an API.
 
 Endpoints:
-  POST /api/chat       — Send a message, get agent response
-  GET  /api/profile    — Get current financial profile
-  PUT  /api/profile    — Update financial profile
-  GET  /api/health     — Health check
+  POST /api/chat        — Send a message, get agent response
+  GET  /api/profile     — Get current financial profile
+  PUT  /api/profile     — Update financial profile
+  GET  /api/reports     — Get all saved report items
+  POST /api/reports     — Save a visualization to the report
+  DELETE /api/reports/{id} — Remove a saved visualization
+  GET  /api/health      — Health check
 """
 
 from fastapi import FastAPI, HTTPException
@@ -14,6 +17,8 @@ from pydantic import BaseModel
 from pathlib import Path
 import json
 import re
+import uuid
+from datetime import datetime
 
 from agent.main import create_agent, _ensure_profile_exists
 from agent.profile import FinancialProfile
@@ -144,6 +149,117 @@ def update_profile(data: dict):
         return {"status": "updated", "message": "Profile saved."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to update profile: {str(e)}")
+
+
+# ─── Reports Persistence ───────────────────────────────────────────────────────
+
+REPORTS_FILE = Path("reports.json")
+
+
+def _load_reports() -> list[dict]:
+    if REPORTS_FILE.exists():
+        return json.loads(REPORTS_FILE.read_text())
+    return []
+
+
+def _save_reports(reports: list[dict]) -> None:
+    REPORTS_FILE.write_text(json.dumps(reports, indent=2))
+
+
+class SaveReportItemRequest(BaseModel):
+    chart_type: str
+    title: str
+    description: str = ""
+
+
+class ReportItem(BaseModel):
+    id: str
+    chart_type: str
+    title: str
+    description: str
+    created_at: str
+    position: int
+
+
+@app.get("/api/reports", response_model=list[ReportItem])
+def get_reports():
+    """Get all saved report visualizations."""
+    return _load_reports()
+
+
+@app.post("/api/reports", response_model=ReportItem)
+def save_report_item(request: SaveReportItemRequest):
+    """Save a visualization to the persistent report dashboard."""
+    reports = _load_reports()
+
+    item = {
+        "id": str(uuid.uuid4())[:8],
+        "chart_type": request.chart_type,
+        "title": request.title,
+        "description": request.description,
+        "created_at": datetime.now().isoformat(),
+        "position": len(reports),
+    }
+
+    reports.append(item)
+    _save_reports(reports)
+    return item
+
+
+@app.delete("/api/reports/{item_id}")
+def delete_report_item(item_id: str):
+    """Remove a visualization from the saved report."""
+    reports = _load_reports()
+    original_len = len(reports)
+    reports = [r for r in reports if r["id"] != item_id]
+
+    if len(reports) == original_len:
+        raise HTTPException(status_code=404, detail=f"Report item '{item_id}' not found")
+
+    # Re-number positions
+    for i, r in enumerate(reports):
+        r["position"] = i
+
+    _save_reports(reports)
+    return {"status": "deleted", "id": item_id}
+
+
+@app.put("/api/reports/reorder")
+def reorder_reports(order: list[str]):
+    """Reorder report items. Pass list of IDs in desired order."""
+    reports = _load_reports()
+    id_to_item = {r["id"]: r for r in reports}
+
+    reordered = []
+    for i, item_id in enumerate(order):
+        if item_id in id_to_item:
+            item = id_to_item[item_id]
+            item["position"] = i
+            reordered.append(item)
+
+    # Append any items not in the order list at the end
+    for r in reports:
+        if r["id"] not in order:
+            r["position"] = len(reordered)
+            reordered.append(r)
+
+    _save_reports(reordered)
+    return {"status": "reordered", "count": len(reordered)}
+
+
+@app.get("/api/reports/{item_id}/render")
+def render_report_item(item_id: str):
+    """Generate a fresh Vega-Lite spec for a saved report item using current profile data."""
+    reports = _load_reports()
+    item = next((r for r in reports if r["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Report item '{item_id}' not found")
+
+    # Import the spec builder from the visualization skill
+    from agent.skills.visualization.tools import _build_spec, _load_profile
+    profile = _load_profile()
+    spec = _build_spec(item["chart_type"], item["title"], profile)
+    return spec
 
 
 # ─── Run ───────────────────────────────────────────────────────────────────────

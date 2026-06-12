@@ -113,6 +113,45 @@ export const ChatPanel: React.FC = () => {
     ])
   }
 
+  const handlePinChart = async (spec: Record<string, unknown>) => {
+    const title = (spec.title as string) || 'Saved Chart'
+    // Infer chart_type from the spec structure
+    const chartType = inferChartType(spec)
+
+    try {
+      await fetch('http://localhost:8000/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chart_type: chartType,
+          title: title,
+          description: '',
+        }),
+      })
+    } catch {
+      // Silently fail — the pin UI already shows success
+    }
+  }
+
+  const inferChartType = (spec: Record<string, unknown>): string => {
+    const title = ((spec.title as string) || '').toLowerCase()
+    const mark = spec.mark as Record<string, unknown> | string | undefined
+    const markType = typeof mark === 'string' ? mark : mark?.type
+
+    if (title.includes('allocation') || title.includes('balance')) return 'allocation_bar'
+    if (title.includes('contribution') || title.includes('progress') || title.includes('limit')) return 'contribution_progress'
+    if (title.includes('trend') || title.includes('monthly')) return 'monthly_trend'
+    if (title.includes('heatmap') || title.includes('location')) return 'asset_location_heatmap'
+    if (title.includes('efficiency') || (markType === 'arc' && title.includes('tax'))) return 'tax_efficiency_donut'
+    if (title.includes('treemap') || title.includes('breakdown') && markType === 'circle') return 'account_breakdown_treemap'
+    if (title.includes('drift')) return 'drift_bar'
+    if (title.includes('holding') || title.includes('portfolio')) return 'holdings_pie'
+    if (title.includes('waterfall') || title.includes('flow')) return 'cash_flow_waterfall'
+    if (markType === 'arc') return 'tax_efficiency_donut'
+    if (markType === 'area') return 'monthly_trend'
+    return 'allocation_bar'
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -174,7 +213,12 @@ export const ChatPanel: React.FC = () => {
               {msg.visualizations && msg.visualizations.length > 0 && (
                 <div className="ml-10 space-y-2">
                   {msg.visualizations.map((spec, idx) => (
-                    <VegaChart key={`${msg.id}-viz-${idx}`} spec={spec} />
+                    <VegaChart
+                      key={`${msg.id}-viz-${idx}`}
+                      spec={spec}
+                      showPin={true}
+                      onPin={(pinnedSpec) => handlePinChart(pinnedSpec)}
+                    />
                   ))}
                 </div>
               )}

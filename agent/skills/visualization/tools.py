@@ -483,3 +483,54 @@ def _cash_flow_waterfall(title: str, profile: FinancialProfile) -> dict:
             ],
         },
     }
+
+
+@tool
+def save_to_report(
+    chart_type: str,
+    title: str,
+    description: str = "",
+) -> str:
+    """Save a visualization to the user's persistent report dashboard.
+    The saved chart will auto-refresh with the latest profile data each time
+    the report is viewed. Use this when:
+    - The user asks to save or pin a chart
+    - You're building a monthly review report
+    - The user says "remember this" or "add to my dashboard"
+
+    Args:
+        chart_type: The chart type to save. Same options as the visualize tool:
+            allocation_bar, contribution_progress, monthly_trend,
+            asset_location_heatmap, tax_efficiency_donut, account_breakdown_treemap,
+            drift_bar, holdings_pie, cash_flow_waterfall
+        title: Title for the saved chart in the report.
+        description: Why this chart is useful / what to look for when reviewing.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    reports_file = _Path("reports.json")
+    reports: list = []
+    if reports_file.exists():
+        reports = _json.loads(reports_file.read_text())
+
+    # Check for duplicates
+    for r in reports:
+        if r["chart_type"] == chart_type and r["title"] == title:
+            return f"Already saved: '{title}' ({chart_type}) is already in your report dashboard."
+
+    import uuid as _uuid
+    from datetime import datetime as _dt
+
+    item = {
+        "id": str(_uuid.uuid4())[:8],
+        "chart_type": chart_type,
+        "title": title,
+        "description": description,
+        "created_at": _dt.now().isoformat(),
+        "position": len(reports),
+    }
+    reports.append(item)
+    reports_file.write_text(_json.dumps(reports, indent=2))
+
+    return f"Saved to report dashboard: '{title}' ({chart_type}). The user can view it in their Reports tab — it will always show the latest data."
