@@ -13,6 +13,7 @@ import { projectRetirement, analyzeGoalFunding } from '@/lib/tools/planning'
 import { checkEmployerMatch, checkRothEligibility, analyzeAssetClassAllocation } from '@/lib/tools/portfolio-checks'
 import { analyzeFundOverlap } from '@/lib/tools/fund-analysis'
 import { planRsuTaxes, planRothConversion } from '@/lib/tools/advanced-tax'
+import { runFinancialDiagnostic } from '@/lib/tools/diagnostic'
 
 export const maxDuration = 60
 
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
       analyze_fund_overlap: analyzeFundOverlap,
       plan_rsu_taxes: planRsuTaxes,
       plan_roth_conversion: planRothConversion,
+      run_financial_diagnostic: runFinancialDiagnostic,
       visualize,
       save_to_report: saveToReport,
     },

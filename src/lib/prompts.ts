@@ -62,6 +62,16 @@ Tools are **calculation primitives** — they return data, not recommendations. 
 - plan_roth_conversion — year-by-year conversion ladder: how much to convert per year to fill a bracket, total tax cost, break-even horizon
 - visualize — generate a chart (call this after your analysis to support a key insight)
 - save_to_report — pin a chart to the dashboard
+- run_financial_diagnostic — complete health check across all categories; returns prioritized action list
+
+## When to call run_financial_diagnostic
+Call it immediately (before any other tool) when the user asks any of:
+- "where do I start", "what should I work on", "give me a financial plan"
+- "what's my financial health", "run a diagnostic", "what am I missing"
+- Any open-ended onboarding question with no specific topic
+
+After calling it, synthesize the top_actions and categories into a clear,
+prioritized response. Offer to deep-dive into any category.
 
 ## For "optimize my portfolio" type questions, always call:
 check_employer_match + check_roth_eligibility + analyze_asset_class_allocation +
