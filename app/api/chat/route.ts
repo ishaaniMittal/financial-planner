@@ -7,7 +7,7 @@ const anthropic = createAnthropic({
   baseURL: 'https://api.anthropic.com/v1',
 })
 import { getContributionLimits, checkContributionPace, calculateTaxBracket, detectIdleCash, suggestRebalancing } from '@/lib/tools/cash-flow'
-import { getPlacementRules, optimizeAssetLocation, calculateTaxDrag, analyzeHoldings } from '@/lib/tools/asset-location'
+import { getPlacementRules, optimizeAssetLocation, calculateTaxDrag, analyzeHoldings, analyzeTaxOpportunities } from '@/lib/tools/asset-location'
 import { visualize, saveToReport } from '@/lib/tools/visualization'
 
 export const maxDuration = 60
@@ -30,6 +30,7 @@ export async function POST(req: Request) {
       optimize_asset_location: optimizeAssetLocation,
       calculate_tax_drag: calculateTaxDrag,
       analyze_holdings: analyzeHoldings,
+      analyze_tax_opportunities: analyzeTaxOpportunities,
       visualize,
       save_to_report: saveToReport,
     },

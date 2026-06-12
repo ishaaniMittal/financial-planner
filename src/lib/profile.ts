@@ -13,6 +13,8 @@ export interface Holding {
   shares: number
   asset_class: AssetClass
   cost_basis_per_share: number
+  current_price: number
+  purchase_date?: string          // ISO date string, used for short/long-term gain classification
   dividend_yield: number
   turnover_rate: number
   expense_ratio: number
@@ -50,6 +52,30 @@ export interface TaxSnapshot {
   net_investment_income_tax: number
 }
 
+export interface Goal {
+  name: string
+  target_amount: number
+  target_date: string
+  priority: number
+  current_progress: number
+  monthly_contribution: number
+}
+
+export interface IncomeSources {
+  source: string
+  annual_amount: number
+  is_w2: boolean
+  employer?: string
+  frequency?: string
+}
+
+export interface HouseholdMember {
+  name: string
+  age: number
+  retirement_age: number
+  is_primary: boolean
+}
+
 export interface FinancialProfile {
   accounts: Account[]
   monthly_history: MonthlySnapshot[]
@@ -59,6 +85,9 @@ export interface FinancialProfile {
   total_annual_investable: number
   target_emergency_fund: number
   risk_tolerance: string
+  goals?: Goal[]
+  income?: IncomeSources[]
+  household?: HouseholdMember[]
 }
 
 const PROFILE_PATH = path.join(process.cwd(), 'profile.json')
@@ -80,4 +109,29 @@ export function totalCash(profile: FinancialProfile): number {
 
 export function excessCash(profile: FinancialProfile): number {
   return Math.max(0, totalCash(profile) - profile.target_emergency_fund)
+}
+
+/** Returns current market value for a holding, falling back to cost basis if no current price. */
+export function holdingMarketValue(h: Holding): number {
+  const price = h.current_price > 0 ? h.current_price : h.cost_basis_per_share
+  return h.shares * price
+}
+
+/** Returns total cost basis for a holding. Returns null if cost basis is unknown (0 in tax-advantaged accounts). */
+export function holdingCostBasis(h: Holding): number | null {
+  if (h.cost_basis_per_share <= 0) return null
+  return h.shares * h.cost_basis_per_share
+}
+
+/** Returns days held, or null if no purchase_date. */
+export function daysHeld(h: Holding, asOfDate = new Date()): number | null {
+  if (!h.purchase_date) return null
+  const purchase = new Date(h.purchase_date)
+  return Math.floor((asOfDate.getTime() - purchase.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+export function isLongTermGain(h: Holding, asOfDate = new Date()): boolean | null {
+  const days = daysHeld(h, asOfDate)
+  if (days === null) return null
+  return days > 365
 }
