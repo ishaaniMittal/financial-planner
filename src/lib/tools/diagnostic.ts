@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { loadProfile, holdingMarketValue, holdingCostBasis, isLongTermGain, excessCash, totalCash } from '../profile'
 import {
   federalMarginalRate, federalTaxOwed, roomInCurrentBracket,
-  ROTH_IRA_PHASEOUT, getBrackets,
+  ROTH_IRA_PHASEOUT, getBrackets, getStateRate, tentativeMinimumTax,
+  CONTRIBUTION_LIMITS, ANNUAL_GIFT_EXCLUSION, LIFETIME_ESTATE_EXEMPTION,
 } from '../tax-data'
 
 type Priority = 'critical' | 'high' | 'medium' | 'low'
@@ -106,18 +107,36 @@ Also flags what profile data is missing and what additional information would un
         })
       }
 
-      // Savings rate check
+      // Savings rate check — use spending data if available, else fall back to contribution proxy
       const totalIncome = profile.income?.reduce((s,i) => s + i.annual_amount, 0) ?? 0
       const totalYtdContribs = profile.accounts.reduce((s,a) => s + a.ytd_contribution, 0)
       const annualizedContribs = currentMonth > 0 ? totalYtdContribs * 12 / currentMonth : totalYtdContribs
-      const savingsRate = totalIncome > 0 ? annualizedContribs / totalIncome : 0
-      if (savingsRate < 0.20 && totalIncome > 0) {
-        findings.push({
-          priority: 'medium',
-          action: 'Review overall savings rate',
-          detail: `Annualized contributions are ~${(savingsRate * 100).toFixed(0)}% of gross income. For aggressive FIRE targets, 30-50%+ is typically needed.`,
-          tool_for_details: 'check_contribution_pace',
-        })
+      const spending = profile.spending ?? []
+      const hasSpending = spending.length > 0
+      if (hasSpending && totalIncome > 0) {
+        const totalMonthlySpend = spending.reduce((s,c) => s + c.monthly_amount, 0)
+        const totalAnnualSpend = totalMonthlySpend * 12
+        const grossSavings = totalIncome - totalAnnualSpend
+        const grossSavingsRate = grossSavings / totalIncome
+        if (grossSavingsRate < 0.20) {
+          findings.push({
+            priority: grossSavingsRate < 0.10 ? 'high' : 'medium',
+            action: `Savings rate is ${(grossSavingsRate * 100).toFixed(0)}% — review spending to improve`,
+            detail: `Gross income $${Math.round(totalIncome/12).toLocaleString()}/mo, spending $${Math.round(totalMonthlySpend).toLocaleString()}/mo, implied savings $${Math.round(grossSavings/12).toLocaleString()}/mo. For FIRE targets, 30-50%+ is typically needed.`,
+            estimated_impact: `Each 5% improvement = $${Math.round(totalIncome * 0.05 / 12).toLocaleString()}/mo more invested`,
+            tool_for_details: 'calculate_savings_rate',
+          })
+        }
+      } else {
+        const savingsRate = totalIncome > 0 ? annualizedContribs / totalIncome : 0
+        if (savingsRate < 0.20 && totalIncome > 0) {
+          findings.push({
+            priority: 'medium',
+            action: 'Review overall savings rate',
+            detail: `Annualized retirement contributions are ~${(savingsRate * 100).toFixed(0)}% of gross income. Add spending data for a complete picture.`,
+            tool_for_details: 'calculate_savings_rate',
+          })
+        }
       }
 
       categories.push({
@@ -432,6 +451,114 @@ Also flags what profile data is missing and what additional information would un
         }
       }
 
+      // Mega backdoor Roth
+      const benefits = (profile as any).benefits ?? {}
+      if (benefits.has_mega_backdoor_roth) {
+        const k401 = profile.accounts.find(a => a.name.toLowerCase().includes('401') || a.id.toLowerCase().includes('401'))
+        const ytdElective = k401?.ytd_contribution ?? 0
+        const annualElective = currentMonth > 0 ? ytdElective * 12 / currentMonth : ytdElective
+        const employerEstimate = k401
+          ? Math.min((k401.employer_match_pct ?? 0) * (profile.income?.[0]?.annual_amount ?? 0), k401.employer_match_limit ?? Infinity)
+          : 0
+        const afterTaxYtd = benefits.after_tax_401k_ytd ?? 0
+        const afterTaxAnnualized = currentMonth > 0 ? afterTaxYtd * 12 / currentMonth : afterTaxYtd
+        const remaining415c = Math.max(0, CONTRIBUTION_LIMITS.k401_total_limit - annualElective - employerEstimate - afterTaxAnnualized)
+        if (remaining415c > 1000) {
+          findings.push({
+            priority: 'high',
+            action: `Use Mega Backdoor Roth — $${Math.round(remaining415c).toLocaleString()} of after-tax 401(k) capacity unused`,
+            detail: `Your plan supports after-tax contributions. ${annualElective > 0 ? `$${Math.round(annualElective).toLocaleString()}` : '$0'} employee + ~$${Math.round(employerEstimate).toLocaleString()} employer = capacity for $${Math.round(remaining415c).toLocaleString()} more after-tax contributions that can convert to Roth.`,
+            estimated_impact: `Up to $${Math.round(remaining415c).toLocaleString()}/yr in additional Roth space`,
+            tool_for_details: 'analyze_mega_backdoor_roth',
+          })
+        }
+      } else if (benefits.has_mega_backdoor_roth === undefined) {
+        findings.push({
+          priority: 'low',
+          action: 'Confirm whether your 401(k) plan supports Mega Backdoor Roth',
+          detail: 'Ask HR: does the plan allow after-tax (non-Roth) contributions? Is in-plan Roth conversion available? This can unlock up to ~$46,500/yr of additional Roth space.',
+          tool_for_details: 'analyze_mega_backdoor_roth',
+        })
+      }
+
+      // Health plan — HDHP check
+      const hpType = benefits.health_plan_type
+      if (hpType && hpType !== 'HDHP' && !hsaAcct) {
+        findings.push({
+          priority: 'medium',
+          action: `Evaluate switching to HDHP + HSA — currently on ${hpType}`,
+          detail: 'If healthy, HDHP premium savings + HSA triple tax advantage often beat PPO. Run a break-even analysis.',
+          tool_for_details: 'compare_health_plans',
+        })
+      } else if (!hpType) {
+        findings.push({
+          priority: 'low',
+          action: 'Add health plan type to profile for HDHP vs PPO analysis',
+          detail: 'Profile is missing benefits.health_plan_type. Once set, the diagnostic can flag HDHP + HSA optimization opportunities.',
+          tool_for_details: 'compare_health_plans',
+        })
+      }
+
+      // Stock options
+      const stockOptions = (profile as any).stock_options ?? []
+      if (stockOptions.length > 0) {
+        const isoGrants = stockOptions.filter((g: any) => g.type === 'ISO')
+        const nsoGrants = stockOptions.filter((g: any) => g.type === 'NSO')
+        const totalVested = stockOptions.reduce((s: number, g: any) => s + (g.vested_shares ?? 0), 0)
+        if (totalVested > 0) {
+          // Check for expiring grants (within 12 months)
+          const soonExpiring = stockOptions.filter((g: any) => {
+            if (!g.expiration_date) return false
+            const exp = new Date(g.expiration_date)
+            const msLeft = exp.getTime() - now.getTime()
+            return msLeft > 0 && msLeft < 365 * 86400000
+          })
+          if (soonExpiring.length > 0) {
+            findings.push({
+              priority: 'critical',
+              action: `${soonExpiring.length} option grant(s) expiring within 12 months — review exercise plan`,
+              detail: `Grant(s) ${soonExpiring.map((g: any) => g.grant_id).join(', ')} expire soon. Unexercised options expire worthless. Run plan_stock_options for exercise cost, tax treatment, and AMT analysis.`,
+              tool_for_details: 'plan_stock_options',
+            })
+          }
+          if (isoGrants.length > 0) {
+            findings.push({
+              priority: 'medium',
+              action: `Review ISO exercise strategy for AMT exposure (${isoGrants.length} ISO grant(s))`,
+              detail: `${totalVested.toLocaleString()} total vested shares across ${stockOptions.length} grant(s). ISO spreads are AMT preference items — exercise timing matters. Use plan_stock_options with current price for full analysis.`,
+              tool_for_details: 'plan_stock_options',
+            })
+          }
+        }
+      }
+
+      // 529 for dependents
+      const children = (profile as any).dependents?.filter((d: any) => d.relationship === 'child') ?? []
+      if (children.length > 0) {
+        const acct529 = profile.accounts.find(a => a.name.toLowerCase().includes('529'))
+        if (!acct529) {
+          findings.push({
+            priority: 'high',
+            action: `Open 529 account for ${children.map((c: any) => c.name).join(', ')}`,
+            detail: `${children.length} child dependent(s) in profile but no 529 account found. Tax-free growth and withdrawals for education. The earlier you start, the more compounding.`,
+            tool_for_details: 'plan_529',
+          })
+        } else {
+          const childAge = children[0].age ?? 0
+          const yearsToCollege = Math.max(1, 18 - childAge)
+          const growthRate = 0.07
+          const projected529 = acct529.balance * Math.pow(1 + growthRate, yearsToCollege)
+          if (projected529 < 200_000) {
+            findings.push({
+              priority: 'medium',
+              action: `529 may be underfunded — projected $${Math.round(projected529).toLocaleString()} by college`,
+              detail: `${children[0].name ?? 'Child'} is ${childAge}, ~${yearsToCollege} years to college. Current 529 balance of $${acct529.balance.toLocaleString()} projects to $${Math.round(projected529).toLocaleString()} at 7%/yr — below typical 4-year university cost. Run plan_529 for required monthly contribution.`,
+              tool_for_details: 'plan_529',
+            })
+          }
+        }
+      }
+
       categories.push({
         category: 'Benefits & Equity Compensation',
         score: findings.some(f => f.priority === 'critical' || f.priority === 'high') ? 'needs_attention' : 'good',
@@ -440,7 +567,195 @@ Also flags what profile data is missing and what additional information would un
     }
 
     // -----------------------------------------------------------------------
-    // 6. PROFILE GAPS
+    // 6. NET WORTH & DEBT
+    // -----------------------------------------------------------------------
+    {
+      const findings: Finding[] = []
+
+      const liabilities = (profile as any).liabilities ?? []
+      const totalLiabilities = liabilities.reduce((s: number, l: any) => s + l.balance, 0)
+
+      const investmentTotal = profile.accounts.filter(a => a.tax_treatment !== 'cash').reduce((s,a) => s + a.balance, 0)
+      const cashTotal = profile.accounts.filter(a => a.tax_treatment === 'cash').reduce((s,a) => s + a.balance, 0)
+      const mortgages = liabilities.filter((l: any) => l.type === 'mortgage')
+      const realEstateValue = mortgages.reduce((s: number, m: any) => s + (m.property_value ?? 0), 0)
+      const totalAssets = investmentTotal + cashTotal + realEstateValue
+      const netWorth = totalAssets - totalLiabilities
+
+      const monthlyIncome = (profile.income?.reduce((s,i) => s + i.annual_amount, 0) ?? 0) / 12
+      const monthlyDebt = liabilities.reduce((s: number, l: any) => s + (l.monthly_payment ?? 0), 0)
+      const dti = monthlyIncome > 0 ? monthlyDebt / monthlyIncome : null
+
+      if (liabilities.length > 0) {
+        // High-interest debt check
+        const highInterest = liabilities.filter((l: any) => l.interest_rate > 7 && l.type !== 'mortgage')
+        if (highInterest.length > 0) {
+          const hiTotal = highInterest.reduce((s: number, l: any) => s + l.balance, 0)
+          findings.push({
+            priority: 'high',
+            action: `Pay down ${highInterest.length} high-interest debt(s) before investing`,
+            detail: `${highInterest.map((l: any) => `${l.name} (${l.interest_rate}%)`).join(', ')} — total $${Math.round(hiTotal).toLocaleString()}. Guaranteed return equals the interest rate, likely better than market after tax.`,
+            estimated_impact: `~$${Math.round(hiTotal * highInterest[0].interest_rate / 100).toLocaleString()}/yr in interest saved`,
+            tool_for_details: 'calculate_net_worth',
+          })
+        }
+        // DTI check
+        if (dti !== null && dti > 0.36) {
+          findings.push({
+            priority: 'high',
+            action: `Reduce debt-to-income ratio (currently ${(dti * 100).toFixed(0)}%)`,
+            detail: `Monthly debt payments ($${Math.round(monthlyDebt).toLocaleString()}) are ${(dti * 100).toFixed(0)}% of gross monthly income ($${Math.round(monthlyIncome).toLocaleString()}). Lenders consider 36%+ high — may limit mortgage qualification or refinancing.`,
+            tool_for_details: 'calculate_net_worth',
+          })
+        } else if (dti !== null && dti > 0.28) {
+          findings.push({
+            priority: 'medium',
+            action: `Debt-to-income ratio is ${(dti * 100).toFixed(0)}% — monitor`,
+            detail: 'Above the 28% conventional mortgage guideline. Paying down debt improves refinancing eligibility and financial flexibility.',
+            tool_for_details: 'calculate_net_worth',
+          })
+        }
+
+        findings.push({
+          priority: 'low',
+          action: 'Review full net worth picture',
+          detail: `Net worth snapshot: $${Math.round(netWorth).toLocaleString()} ($${Math.round(totalAssets).toLocaleString()} assets − $${Math.round(totalLiabilities).toLocaleString()} liabilities). Run calculate_net_worth for liquid/illiquid breakdown.`,
+          tool_for_details: 'calculate_net_worth',
+        })
+      } else {
+        findings.push({
+          priority: 'low',
+          action: 'Add liabilities to profile for net worth and debt analysis',
+          detail: 'No liabilities found — if you have a mortgage, student loans, or other debt, add them to unlock DTI analysis, net worth calculation, and debt payoff vs invest modeling.',
+          tool_for_details: 'calculate_net_worth',
+        })
+      }
+
+      // Planned state move flag
+      const plannedMoves = (profile as any).planned_moves ?? []
+      if (plannedMoves.length > 0) {
+        const move = plannedMoves[0]
+        const highTaxDest = ['CA', 'NY', 'NJ', 'OR', 'MN'].includes((move.to_state ?? '').toUpperCase())
+        if (highTaxDest) {
+          findings.push({
+            priority: 'high',
+            action: `Plan equity vesting around ${move.from_state}→${move.to_state} move (high tax impact)`,
+            detail: `Planned move to ${move.to_state} (high income tax state). RSU vesting and option exercises after establishing ${move.to_state} domicile will be subject to ${move.to_state} income tax. Accelerating vesting events before the move may save significantly.`,
+            tool_for_details: 'plan_state_residency_timing',
+          })
+        }
+      }
+
+      categories.push({
+        category: 'Net Worth & Debt',
+        score: findings.some(f => f.priority === 'critical' || f.priority === 'high') ? 'needs_attention' : 'good',
+        findings,
+      })
+    }
+
+    // -----------------------------------------------------------------------
+    // 7. SPECIALIZED PLANNING (Phase 3)
+    // -----------------------------------------------------------------------
+    {
+      const findings: Finding[] = []
+
+      // Foreign accounts / FBAR
+      const foreignAccounts = (profile as any).foreign_accounts ?? []
+      const hasNreNro = foreignAccounts.length > 0
+      // Even without profile data, flag if user appears to be an NRI (check name/context)
+      if (hasNreNro) {
+        const aggregateUsd = foreignAccounts.reduce((s: number, a: any) => s + (a.balance_usd ?? 0), 0)
+        if (aggregateUsd > 10_000) {
+          findings.push({
+            priority: 'critical',
+            action: `File FBAR (FinCEN 114) — foreign account balance $${Math.round(aggregateUsd).toLocaleString()} exceeds $10,000 threshold`,
+            detail: 'Aggregate foreign account balance exceeds the $10,000 FBAR filing threshold. Failure to file can result in $10,000+ penalties per violation.',
+            tool_for_details: 'plan_foreign_accounts',
+          })
+        }
+        findings.push({
+          priority: 'medium',
+          action: 'Review NRE/NRO interest reporting — NRE interest is US-taxable despite India exemption',
+          detail: 'NRE account interest is often overlooked on US returns. NRO interest qualifies for foreign tax credit to offset Indian TDS. Run plan_foreign_accounts for full analysis.',
+          tool_for_details: 'plan_foreign_accounts',
+        })
+      } else {
+        // Nudge — user likely has Indian accounts based on roadmap context
+        findings.push({
+          priority: 'low',
+          action: 'Add foreign account data (NRE/NRO) to profile for FBAR/FATCA analysis',
+          detail: 'If you hold NRE or NRO accounts in India, FBAR filing is required if aggregate balance > $10,000 at any point during the year. Use plan_foreign_accounts for full obligations analysis.',
+          tool_for_details: 'plan_foreign_accounts',
+        })
+      }
+
+      // State residency timing (check planned_moves)
+      const plannedMoves = (profile as any).planned_moves ?? []
+      if (plannedMoves.length > 0) {
+        const highTaxDest = plannedMoves.find((m: any) => ['CA', 'NY', 'NJ', 'OR', 'MN'].includes((m.to_state ?? '').toUpperCase()))
+        if (highTaxDest) {
+          findings.push({
+            priority: 'high',
+            action: `Time RSU/option vesting before ${highTaxDest.from_state}→${highTaxDest.to_state} move`,
+            detail: `Equity events vesting after CA domicile is established are subject to CA's up to 13.3% income tax. CA source-income rules also apply partial-year proration. Accelerate or defer vesting events strategically.`,
+            tool_for_details: 'plan_state_residency_timing',
+          })
+        }
+      }
+
+      // Gift/inheritance planning
+      findings.push({
+        priority: 'medium',
+        action: 'Plan asset transfers from parents using annual gift exclusions and inheritance step-up',
+        detail: `Each parent can gift $${ANNUAL_GIFT_EXCLUSION.toLocaleString()}/yr per recipient ($${(ANNUAL_GIFT_EXCLUSION * 2).toLocaleString()} for both parents) without using lifetime exemption. Highly appreciated assets are better inherited (stepped-up basis) than gifted. TCJA lifetime exemption ($${LIFETIME_ESTATE_EXEMPTION.toLocaleString()}) sunsets after 2025.`,
+        tool_for_details: 'plan_gift_and_inheritance',
+      })
+
+      // Insurance needs
+      const totalIncome = profile.income?.reduce((s,i) => s + i.annual_amount, 0) ?? 0
+      const hasDependents = (profile.dependents?.length ?? 0) > 0
+      if (hasDependents && totalIncome > 0) {
+        findings.push({
+          priority: 'high',
+          action: 'Verify life insurance coverage is adequate for dependents',
+          detail: `Rule of thumb: 10x income ($${Math.round(totalIncome * 10).toLocaleString()}) in life insurance while dependents are in the picture. Also check disability insurance (65% income replacement) and umbrella policy.`,
+          tool_for_details: 'analyze_insurance_needs',
+        })
+      } else {
+        findings.push({
+          priority: 'medium',
+          action: 'Review disability insurance and umbrella policy coverage',
+          detail: 'Disability insurance (65% of income) protects your earning ability. Umbrella policy protects accumulated net worth. Run analyze_insurance_needs for a full gap analysis.',
+          tool_for_details: 'analyze_insurance_needs',
+        })
+      }
+
+      // Estate basics
+      if (hasDependents) {
+        findings.push({
+          priority: 'critical',
+          action: 'Complete estate planning basics — will, guardian designation, beneficiary audit',
+          detail: 'With minor dependents, a will with guardian designation and current beneficiary designations on all accounts are essential. Retirement account beneficiaries override wills — check each account.',
+          tool_for_details: 'plan_estate_basics',
+        })
+      } else {
+        findings.push({
+          priority: 'medium',
+          action: 'Audit beneficiary designations, healthcare directive, and power of attorney',
+          detail: 'Estate basics — beneficiary designations on retirement accounts, healthcare directive, and durable POA — protect you and your estate at minimal cost. Run plan_estate_basics for a full checklist.',
+          tool_for_details: 'plan_estate_basics',
+        })
+      }
+
+      categories.push({
+        category: 'Specialized Planning',
+        score: findings.some(f => f.priority === 'critical' || f.priority === 'high') ? 'needs_attention' : 'good',
+        findings,
+      })
+    }
+
+    // -----------------------------------------------------------------------
+    // 8. PROFILE GAPS
     // -----------------------------------------------------------------------
     {
       const findings: Finding[] = []

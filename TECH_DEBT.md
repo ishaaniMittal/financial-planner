@@ -101,3 +101,48 @@ Each entry records what was hardcoded, why, and what a better solution looks lik
 **Trigger to fix:** When user provides PPO plan details for accurate comparison.
 
 ---
+
+## Hardcoded USD/INR exchange rate in plan_foreign_accounts
+
+**File:** `src/lib/tools/specialized.ts` — `plan_foreign_accounts`
+**Added:** 2025-06-12
+
+**What's hardcoded:** Default USD/INR rate of 84 used when user doesn't provide a rate.
+
+**Why:** FX rates require a live API key. For account balance estimation, a static default is sufficient as a starting point.
+
+**Better solution:** Integrate a free FX API (e.g. Open Exchange Rates, ExchangeRate.host, or Fixer.io free tier) to fetch live USD/INR rate.
+
+**Trigger to fix:** When INR/USD rate has moved significantly (>5%) from the hardcoded value, or when user reports inaccurate balance calculations.
+
+---
+
+## Hardcoded India TDS rate and US-India treaty rate
+
+**File:** `src/lib/tools/specialized.ts` — `plan_foreign_accounts`
+**Added:** 2025-06-12
+
+**What's hardcoded:** India standard NRO TDS rate (30%) and US-India treaty reduced rate (15%) per Article 11.
+
+**Why:** These are IRS/India IT Act statutory rates that rarely change. The 30% TDS rate has been stable for many years.
+
+**Better solution:** Source from an international tax treaty database if rates change. The IRS publishes treaty text at irs.gov/businesses/international-businesses/united-states-income-tax-treaties-a-to-z.
+
+**Trigger to fix:** If India amends its TDS rates or the US-India treaty is renegotiated.
+
+---
+
+## Hardcoded life/disability/umbrella insurance rule-of-thumb constants
+
+**File:** `src/lib/tools/specialized.ts` — `analyze_insurance_needs`
+**Added:** 2025-06-12
+
+**What's hardcoded:** Life insurance at 10x income, disability at 65% income replacement, umbrella threshold at $500k net worth.
+
+**Why:** These are widely-cited financial planning heuristics, not regulatory figures. They are appropriate for a general-purpose personal finance tool.
+
+**Better solution:** Allow user to configure custom multipliers in their profile. For more precise recommendations, integrate with an actuary table or insurance quote API.
+
+**Trigger to fix:** When users have specialized situations (e.g., high net worth, single earner households) where standard rules significantly under/overestimate.
+
+---

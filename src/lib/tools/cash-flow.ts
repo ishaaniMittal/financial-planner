@@ -3,6 +3,127 @@ import { z } from 'zod'
 import { loadProfile, excessCash, totalCash } from '../profile'
 import { getBrackets, getStateRate, federalTaxOwed, federalMarginalRate, TAX_YEAR } from '../tax-data'
 
+export const calculateSavingsRate = tool({
+  description: `Calculate the user's savings rate from profile income and spending data.
+Returns gross savings rate, after-tax (investable) savings rate, retirement-only rate,
+and flags if below recommended thresholds (15-20% for retirement, 50/30/20 benchmarks).
+Requires profile.spending to be populated; returns partial results if spending is missing.`,
+  inputSchema: zodSchema(z.object({})),
+  execute: async () => {
+    const profile = loadProfile()
+
+    const grossAnnualIncome = profile.income?.reduce((s, i) => s + i.annual_amount, 0) ?? 0
+    const grossMonthlyIncome = grossAnnualIncome / 12
+
+    // Spending from profile
+    const spending = profile.spending ?? []
+    const totalMonthlySpend = spending.reduce((s, c) => s + c.monthly_amount, 0)
+    const totalAnnualSpend = totalMonthlySpend * 12
+
+    const hasSpendingData = spending.length > 0
+
+    // Estimated taxes (federal + state on AGI as proxy)
+    const agi = profile.tax.estimated_agi
+    const filingStatus = profile.tax.filing_status
+    const stateRate = getStateRate(profile.tax.state)
+    const estimatedFederalTax = federalTaxOwed(agi, filingStatus)
+    const estimatedStateTax = agi * stateRate
+    const estimatedTotalTax = estimatedFederalTax + estimatedStateTax
+    const afterTaxAnnualIncome = grossAnnualIncome - estimatedTotalTax
+    const afterTaxMonthlyIncome = afterTaxAnnualIncome / 12
+
+    // Retirement-account contributions (annualized from YTD)
+    const currentMonth = profile.current_month
+    const retirementAccounts = profile.accounts.filter(a =>
+      a.tax_treatment === 'tax_deferred' || a.tax_treatment === 'tax_free'
+    )
+    const ytdRetirement = retirementAccounts.reduce((s, a) => s + a.ytd_contribution, 0)
+    const annualizedRetirement = currentMonth > 0 ? ytdRetirement * 12 / currentMonth : ytdRetirement
+
+    // Rates (only meaningful if spending data exists)
+    const grossSavingsAnnual = grossAnnualIncome - totalAnnualSpend
+    const grossSavingsRate = grossAnnualIncome > 0 ? grossSavingsAnnual / grossAnnualIncome : null
+    const afterTaxSavingsRate = afterTaxAnnualIncome > 0 ? (afterTaxAnnualIncome - totalAnnualSpend) / afterTaxAnnualIncome : null
+    const retirementSavingsRate = grossAnnualIncome > 0 ? annualizedRetirement / grossAnnualIncome : null
+
+    // Spending breakdown by category
+    const categoryBreakdown = spending.map(c => ({
+      category: c.category,
+      monthly: c.monthly_amount,
+      annual: c.monthly_amount * 12,
+      pct_of_gross_income: grossMonthlyIncome > 0
+        ? parseFloat(((c.monthly_amount / grossMonthlyIncome) * 100).toFixed(1))
+        : null,
+    }))
+
+    // 50/30/20 buckets: needs/wants/savings
+    const NEEDS_CATEGORIES = new Set(['housing', 'rent', 'mortgage', 'utilities', 'groceries', 'food', 'transportation', 'insurance', 'childcare', 'healthcare', 'medical'])
+    const WANTS_CATEGORIES = new Set(['dining', 'entertainment', 'travel', 'shopping', 'subscriptions', 'personal', 'hobbies'])
+    let needsMonthly = 0, wantsMonthly = 0, otherMonthly = 0
+    for (const c of spending) {
+      const key = c.category.toLowerCase()
+      if ([...NEEDS_CATEGORIES].some(n => key.includes(n))) needsMonthly += c.monthly_amount
+      else if ([...WANTS_CATEGORIES].some(w => key.includes(w))) wantsMonthly += c.monthly_amount
+      else otherMonthly += c.monthly_amount
+    }
+
+    // Flags
+    const flags: string[] = []
+    if (!hasSpendingData) {
+      flags.push('No spending data in profile — add profile.spending to get full analysis.')
+    } else {
+      if (grossSavingsRate !== null && grossSavingsRate < 0.20) {
+        flags.push(`Gross savings rate (${(grossSavingsRate * 100).toFixed(0)}%) is below the 20% benchmark. For FIRE targets, 30-50%+ is typically needed.`)
+      }
+      if (retirementSavingsRate !== null && retirementSavingsRate < 0.15) {
+        flags.push(`Retirement savings rate (${(retirementSavingsRate * 100).toFixed(0)}%) is below the 15% minimum recommended for retirement readiness.`)
+      }
+      if (grossMonthlyIncome > 0 && needsMonthly / grossMonthlyIncome > 0.50) {
+        flags.push(`Fixed/essential spending is ${((needsMonthly / grossMonthlyIncome) * 100).toFixed(0)}% of gross income — above the 50% 50/30/20 guideline.`)
+      }
+    }
+
+    return {
+      income: {
+        gross_annual: Math.round(grossAnnualIncome),
+        gross_monthly: Math.round(grossMonthlyIncome),
+        estimated_tax: Math.round(estimatedTotalTax),
+        after_tax_annual: Math.round(afterTaxAnnualIncome),
+        after_tax_monthly: Math.round(afterTaxMonthlyIncome),
+      },
+      spending: hasSpendingData ? {
+        total_monthly: Math.round(totalMonthlySpend),
+        total_annual: Math.round(totalAnnualSpend),
+        categories: categoryBreakdown,
+        buckets: {
+          needs_monthly: Math.round(needsMonthly),
+          wants_monthly: Math.round(wantsMonthly),
+          other_monthly: Math.round(otherMonthly),
+          needs_pct_gross: grossMonthlyIncome > 0 ? parseFloat(((needsMonthly / grossMonthlyIncome) * 100).toFixed(1)) : null,
+          wants_pct_gross: grossMonthlyIncome > 0 ? parseFloat(((wantsMonthly / grossMonthlyIncome) * 100).toFixed(1)) : null,
+        },
+      } : null,
+      savings_rates: {
+        gross_savings_rate_pct: hasSpendingData && grossSavingsRate !== null ? parseFloat((grossSavingsRate * 100).toFixed(1)) : null,
+        after_tax_savings_rate_pct: hasSpendingData && afterTaxSavingsRate !== null ? parseFloat((afterTaxSavingsRate * 100).toFixed(1)) : null,
+        retirement_only_rate_pct: retirementSavingsRate !== null ? parseFloat((retirementSavingsRate * 100).toFixed(1)) : null,
+        annualized_retirement_contributions: Math.round(annualizedRetirement),
+      },
+      benchmarks: {
+        gross_20pct_target: Math.round(grossAnnualIncome * 0.20),
+        gross_30pct_target: Math.round(grossAnnualIncome * 0.30),
+        retirement_15pct_target: Math.round(grossAnnualIncome * 0.15),
+        retirement_20pct_target: Math.round(grossAnnualIncome * 0.20),
+      },
+      flags,
+      has_spending_data: hasSpendingData,
+      summary: hasSpendingData
+        ? `Gross savings rate: ${grossSavingsRate !== null ? (grossSavingsRate * 100).toFixed(0) + '%' : 'N/A'}. After-tax: ${afterTaxSavingsRate !== null ? (afterTaxSavingsRate * 100).toFixed(0) + '%' : 'N/A'}. Retirement-only: ${retirementSavingsRate !== null ? (retirementSavingsRate * 100).toFixed(0) + '%' : 'N/A'}.${flags.length ? ' ' + flags[0] : ''}`
+        : `Retirement contributions annualized to $${Math.round(annualizedRetirement).toLocaleString()}/yr (${retirementSavingsRate !== null ? (retirementSavingsRate * 100).toFixed(0) + '%' : 'N/A'} of gross income). Add spending data to profile for full savings rate analysis.`,
+    }
+  },
+})
+
 export const getContributionLimits = tool({
   description:
     'Get IRS contribution limits for all account types. Returns annual max, YTD contributions, remaining capacity, and pace status for each account.',

@@ -6,7 +6,7 @@ const anthropic = createAnthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   baseURL: 'https://api.anthropic.com/v1',
 })
-import { getContributionLimits, checkContributionPace, calculateTaxBracket, detectIdleCash, suggestRebalancing } from '@/lib/tools/cash-flow'
+import { getContributionLimits, checkContributionPace, calculateTaxBracket, detectIdleCash, suggestRebalancing, calculateSavingsRate } from '@/lib/tools/cash-flow'
 import { getPlacementRules, optimizeAssetLocation, calculateTaxDrag, analyzeHoldings, analyzeTaxOpportunities } from '@/lib/tools/asset-location'
 import { visualize, saveToReport } from '@/lib/tools/visualization'
 import { projectRetirement, analyzeGoalFunding } from '@/lib/tools/planning'
@@ -15,6 +15,7 @@ import { analyzeFundOverlap } from '@/lib/tools/fund-analysis'
 import { planRsuTaxes, planRothConversion } from '@/lib/tools/advanced-tax'
 import { runFinancialDiagnostic } from '@/lib/tools/diagnostic'
 import { analyzeMegaBackdoorRoth, compareHealthPlans, planStockOptions, plan529, calculateNetWorth } from '@/lib/tools/benefits-equity'
+import { planStateResidencyTiming, planForeignAccounts, planGiftAndInheritance, planConcentrationUnwind, analyzeInsuranceNeeds, planEstateBasics } from '@/lib/tools/specialized'
 
 export const maxDuration = 60
 
@@ -51,6 +52,13 @@ export async function POST(req: Request) {
       plan_stock_options: planStockOptions,
       plan_529: plan529,
       calculate_net_worth: calculateNetWorth,
+      calculate_savings_rate: calculateSavingsRate,
+      plan_state_residency_timing: planStateResidencyTiming,
+      plan_foreign_accounts: planForeignAccounts,
+      plan_gift_and_inheritance: planGiftAndInheritance,
+      plan_concentration_unwind: planConcentrationUnwind,
+      analyze_insurance_needs: analyzeInsuranceNeeds,
+      plan_estate_basics: planEstateBasics,
       visualize,
       save_to_report: saveToReport,
     },

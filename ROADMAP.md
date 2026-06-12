@@ -6,19 +6,24 @@ and handle deep targeted questions in any financial planning category.
 
 ---
 
-## Current state (as of 2025-06-11)
+## Current state (as of 2025-06-12)
 
-**23 tools across 6 categories:**
-- Cash Flow & Contributions: `get_contribution_limits`, `check_contribution_pace`, `detect_idle_cash`, `suggest_rebalancing`, `check_employer_match`
+**Phase 1 complete. Phase 2 complete. Phase 2.5 complete. Phase 3 complete. On Phase 4.**
+
+**33 tools across 8 categories:**
+- Cash Flow & Contributions: `get_contribution_limits`, `check_contribution_pace`, `detect_idle_cash`, `suggest_rebalancing`, `check_employer_match`, `calculate_savings_rate`
 - Tax: `calculate_tax_bracket`, `check_roth_eligibility`, `analyze_tax_opportunities`
 - Asset Location: `get_placement_rules`, `optimize_asset_location`, `calculate_tax_drag`
 - Holdings Analysis: `analyze_holdings`, `analyze_asset_class_allocation`
 - Retirement & Goals: `project_retirement`, `analyze_goal_funding`
-- Portfolio Checks: `check_employer_match`, `check_roth_eligibility`, `analyze_asset_class_allocation`
 - Advanced: `analyze_fund_overlap`, `plan_rsu_taxes`, `plan_roth_conversion`
+- Benefits & Equity *(Phase 2)*: `analyze_mega_backdoor_roth`, `compare_health_plans`, `plan_stock_options`, `plan_529`, `calculate_net_worth`
+- Specialized *(Phase 3)*: `plan_state_residency_timing`, `plan_foreign_accounts`, `plan_gift_and_inheritance`, `plan_concentration_unwind`, `analyze_insurance_needs`, `plan_estate_basics`
+- Diagnostic: `run_financial_diagnostic`
 - Visualization: `visualize`, `save_to_report`
 
-**Profile captures:** accounts, holdings, tax, monthly history, goals, income, household
+**Profile captures:** accounts, holdings, tax, monthly history, goals, income, household,
+dependents, liabilities, benefits, stock_options, spending, planned_moves
 
 ---
 
@@ -59,6 +64,34 @@ additional information would unlock better analysis.
 - **`plan_stock_options`** — ISO vs NSO tax treatment, AMT exposure for ISOs, optimal exercise timing, 83(b) election for early exercise
 - **`plan_529`** — contribution amount for education goal, state tax deduction if applicable, superfunding (5-year gift tax election), UTMA vs 529 tradeoffs
 - **`calculate_net_worth`** — assets minus liabilities, liquid vs illiquid breakdown
+
+---
+
+## Phase 2.5 — Close gaps before Phase 3
+
+These are quick wins that became unblocked by Phase 2's profile additions, plus
+cleanup needed before the Phase 3 tools can rely on a complete diagnostic picture.
+
+### Update `run_financial_diagnostic`
+
+The diagnostic was built in Phase 1 and doesn't call any Phase 2 tools. Before adding
+more tools in Phase 3, it should surface:
+- Net worth snapshot and debt picture (`calculate_net_worth`)
+- Benefits gaps: mega backdoor Roth headroom, HDHP vs PPO status (`analyze_mega_backdoor_roth`, `compare_health_plans`)
+- Stock options exposure: vested value, AMT risk (`plan_stock_options`)
+- 529 funding status vs college timeline (`plan_529`)
+- Savings rate (once `calculate_savings_rate` exists — see below)
+- Flags for newly-available profile fields: pending state move, liabilities, dependents
+
+### Add `calculate_savings_rate`
+
+Phase 4 planned this as a Plaid-dependent tool, but `spending` is now in the profile.
+Build a static version now:
+- Income (from `profile.income`) minus total monthly spend (from `profile.spending`)
+- Savings rate = (income - spend) / income
+- Break down: gross savings rate, investable savings rate (after taxes), retirement-only rate
+- Flag if below recommended thresholds (15-20% for retirement, 50/30/20 benchmarks)
+
 
 ---
 
