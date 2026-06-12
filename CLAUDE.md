@@ -27,12 +27,12 @@ All hardcoded reference data must be centralized in one of these files:
 |------|--------------------|
 | `src/lib/tax-data.ts` | IRS tax brackets, contribution limits, phaseout thresholds, NIIT, LTCG rates, state rates, standard deductions |
 | `src/lib/fund-data.ts` | ETF/mutual fund metadata: tickers, expense ratios, index tracked, overlap groups, cheaper alternatives |
-| `src/lib/strategies.ts` | Rule-of-thumb financial planning heuristics: target savings rates, glide path curves, asset class placement rules, emergency fund multiples |
 
 Rules:
 - Tool files (`src/lib/tools/*.ts`) must **import** constants — never define them inline.
-- If a value could change year-to-year or user-to-user, it belongs in one of the files above.
-- If none of the three files fits, create a new `src/lib/<domain>-data.ts` and document it here.
+- If a value could change year-to-year or is a precise regulatory figure, it belongs in one of the files above.
+- If none of the existing files fits, create a new `src/lib/<domain>-data.ts` and document it here.
+- **Do not create a strategies file.** Planning heuristics (asset location rules, glide paths, savings rate targets) live in the model's reasoning, not in code. The constants files are for numbers that require precision, not for encoding judgment the model already has.
 
 ## Project context
 
