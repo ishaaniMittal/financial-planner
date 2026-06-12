@@ -17,7 +17,7 @@ const STATE_RATES: Record<string, number> = {
 
 export const getContributionLimits = tool({
   description:
-    'Get IRS contribution limits for all account types. Shows annual max, YTD contributions, and remaining capacity for each account.',
+    'Get IRS contribution limits for all account types. Returns annual max, YTD contributions, remaining capacity, and pace status for each account.',
   inputSchema: zodSchema(z.object({
     year: z.number().optional().describe('Tax year. Defaults to 2025.'),
   })),
@@ -26,54 +26,60 @@ export const getContributionLimits = tool({
     const expectedPct = profile.current_month / 12
     const monthsLeft = 12 - profile.current_month
 
-    const lines: string[] = [`=== IRS Contribution Limits (${year}) ===\n`]
-    lines.push('Standard Limits:')
-    lines.push('  401(k) / 403(b) / 457(b): $23,500')
-    lines.push('  IRA (Traditional + Roth combined): $7,000')
-    lines.push('  HSA (individual): $4,300 | HSA (family): $8,550')
-    lines.push('  ESPP: $25,000 (fair market value)')
-    lines.push('  Catch-up (age 50+): +$7,500 for 401k, +$1,000 for IRA\n')
+    const accounts = profile.accounts
+      .filter(a => a.annual_contribution_limit !== null)
+      .map(a => {
+        const remaining = a.annual_contribution_limit! - a.ytd_contribution
+        const pctUsed = a.ytd_contribution / a.annual_contribution_limit!
+        let pace: 'maxed' | 'on_track' | 'behind' = 'behind'
+        if (pctUsed >= 1.0) pace = 'maxed'
+        else if (pctUsed >= expectedPct - 0.05) pace = 'on_track'
+        return {
+          name: a.name,
+          annual_limit: a.annual_contribution_limit!,
+          ytd_contribution: a.ytd_contribution,
+          remaining,
+          pct_used: parseFloat((pctUsed * 100).toFixed(1)),
+          pace,
+        }
+      })
 
-    lines.push('Your Account Status:')
-    lines.push(`${'Account'.padEnd(22)} ${'Limit'.padStart(10)} ${'YTD'.padStart(10)} ${'Remaining'.padStart(10)} ${'Pace'.padStart(8)}`)
-    lines.push('-'.repeat(65))
+    const totalRemaining = accounts.reduce((s, a) => s + a.remaining, 0)
+    const requiredMonthlyRate = monthsLeft > 0 ? Math.round(totalRemaining / monthsLeft) : 0
 
-    let totalRemaining = 0
-    for (const account of profile.accounts) {
-      if (account.annual_contribution_limit === null) continue
-      const remaining = account.annual_contribution_limit - account.ytd_contribution
-      totalRemaining += remaining
-      const pctUsed = account.ytd_contribution / account.annual_contribution_limit
-      let pace = pctUsed >= expectedPct - 0.05 ? 'On Track' : 'Behind'
-      if (pctUsed >= 1.0) pace = 'Maxed'
-      lines.push(
-        `  ${account.name.padEnd(20)} $${account.annual_contribution_limit.toLocaleString().padStart(8)} $${account.ytd_contribution.toLocaleString().padStart(8)} $${remaining.toLocaleString().padStart(8)} ${pace.padStart(8)}`
-      )
+    return {
+      year,
+      current_month: profile.current_month,
+      months_left: monthsLeft,
+      accounts,
+      total_remaining: totalRemaining,
+      required_monthly_rate: requiredMonthlyRate,
+      standard_limits: {
+        '401k_403b_457b': 23500,
+        ira: 7000,
+        hsa_individual: 4300,
+        hsa_family: 8550,
+        espp_fmv: 25000,
+        catchup_401k: 7500,
+        catchup_ira: 1000,
+      },
+      summary: `${accounts.filter(a => a.pace === 'maxed').length} maxed, ${accounts.filter(a => a.pace === 'on_track').length} on track, ${accounts.filter(a => a.pace === 'behind').length} behind. $${totalRemaining.toLocaleString()} remaining across all accounts. Need $${requiredMonthlyRate.toLocaleString()}/mo to max everything by year-end.`,
     }
-
-    lines.push('-'.repeat(65))
-    lines.push(`  Total remaining tax-advantaged space: $${totalRemaining.toLocaleString()}`)
-    lines.push(`  Months remaining in year: ${monthsLeft}`)
-    if (monthsLeft > 0) {
-      lines.push(`  Required monthly rate to max all: $${Math.round(totalRemaining / monthsLeft).toLocaleString()}/mo`)
-    }
-    return lines.join('\n')
   },
 })
 
 export const checkContributionPace = tool({
   description:
-    'Check whether contributions to each account are on pace to max out by year-end. Flags accounts behind schedule.',
+    'Check whether contributions to each account are on pace to max out by year-end. Flags accounts behind schedule with the monthly increase needed.',
   inputSchema: zodSchema(z.object({})),
   execute: async () => {
     const profile = loadProfile()
     const expectedPct = profile.current_month / 12
     const monthsLeft = 12 - profile.current_month
 
-    const lines: string[] = [`=== Contribution Pace Check (Month ${profile.current_month}/12) ===\n`]
-    lines.push(`Expected pace: ${Math.round(expectedPct * 100)}% of annual limits used\n`)
-
-    const behind: string[] = [], onTrack: string[] = [], maxed: string[] = []
+    const behind: { name: string; pct_used: number; deficit: number; monthly_needed: number; remaining: number }[] = []
+    const on_track: { name: string; pct_used: number; remaining: number }[] = []
+    const maxed: { name: string; annual_limit: number }[] = []
 
     for (const account of profile.accounts) {
       if (account.annual_contribution_limit === null) continue
@@ -81,34 +87,40 @@ export const checkContributionPace = tool({
       const remaining = account.annual_contribution_limit - account.ytd_contribution
 
       if (actualPct >= 1.0) {
-        maxed.push(`  ${account.name}: MAXED ($${account.annual_contribution_limit.toLocaleString()})`)
+        maxed.push({ name: account.name, annual_limit: account.annual_contribution_limit })
       } else if (actualPct >= expectedPct - 0.05) {
-        onTrack.push(`  ${account.name}: ${Math.round(actualPct * 100)}% used ($${remaining.toLocaleString()} remaining)`)
+        on_track.push({ name: account.name, pct_used: parseFloat((actualPct * 100).toFixed(1)), remaining })
       } else {
         const deficit = expectedPct * account.annual_contribution_limit - account.ytd_contribution
-        const monthlyNeeded = monthsLeft > 0 ? remaining / monthsLeft : remaining
-        behind.push(
-          `  ${account.name}: ${Math.round(actualPct * 100)}% used — $${Math.round(deficit).toLocaleString()} behind pace — need $${Math.round(monthlyNeeded).toLocaleString()}/mo to max out`
-        )
+        const monthly_needed = monthsLeft > 0 ? Math.round(remaining / monthsLeft) : remaining
+        behind.push({
+          name: account.name,
+          pct_used: parseFloat((actualPct * 100).toFixed(1)),
+          deficit: Math.round(deficit),
+          monthly_needed,
+          remaining,
+        })
       }
     }
 
-    if (maxed.length) { lines.push('Maxed Out:'); lines.push(...maxed); lines.push('') }
-    if (onTrack.length) { lines.push('On Track:'); lines.push(...onTrack); lines.push('') }
-    if (behind.length) {
-      lines.push('Behind Pace:'); lines.push(...behind); lines.push('')
-      lines.push('Action: Increase contributions to behind accounts before adding to taxable.')
-    } else {
-      lines.push('All accounts with limits are on track or maxed.')
+    return {
+      current_month: profile.current_month,
+      expected_pct_used: parseFloat((expectedPct * 100).toFixed(1)),
+      months_left: monthsLeft,
+      behind,
+      on_track,
+      maxed,
+      action_needed: behind.length > 0,
+      summary: behind.length === 0
+        ? 'All accounts with limits are on track or maxed.'
+        : `${behind.length} account(s) behind pace: ${behind.map(a => `${a.name} (needs $${a.monthly_needed}/mo)`).join(', ')}.`,
     }
-
-    return lines.join('\n')
   },
 })
 
 export const calculateTaxBracket = tool({
   description:
-    'Calculate the federal and state tax brackets for the user. Helps decide between Roth and Traditional contributions.',
+    'Calculate federal and state tax brackets. Returns marginal rates, effective rate, and Roth vs Traditional guidance.',
   inputSchema: zodSchema(z.object({
     additional_income: z.number().optional().describe('Optional additional income to model marginal impact.'),
   })),
@@ -129,90 +141,97 @@ export const calculateTaxBracket = tool({
     const effectiveFederal = agi > 0 ? federalTax / agi : 0
     const combined = marginalRate + stateRate
 
-    const lines: string[] = ['=== Tax Bracket Analysis ===\n']
-    lines.push(`Filing Status: ${profile.tax.filing_status.replace(/_/g, ' ')}`)
-    lines.push(`State: ${profile.tax.state}`)
-    lines.push(`Estimated AGI: $${agi.toLocaleString()}`)
-    if (additional_income > 0) lines.push(`  (includes $${additional_income.toLocaleString()} additional income)`)
-    lines.push('')
-    lines.push(`Federal Marginal Rate: ${(marginalRate * 100).toFixed(1)}%`)
-    lines.push(`Federal Effective Rate: ${(effectiveFederal * 100).toFixed(1)}%`)
-    lines.push(`State Marginal Rate: ${(stateRate * 100).toFixed(1)}%`)
-    lines.push(`Combined Marginal Rate: ${(combined * 100).toFixed(1)}%`)
-    lines.push(`Long-Term Cap Gains Rate: ${(profile.tax.long_term_cap_gains_rate * 100).toFixed(1)}%`)
-    lines.push(`NIIT (3.8%): ${agi > 200000 ? 'Applies' : 'Does not apply'}`)
-    lines.push('\n--- Roth vs. Traditional Guidance ---')
+    let roth_vs_traditional: 'roth' | 'traditional' | 'mix'
+    let roth_vs_traditional_reason: string
     if (combined >= 0.35) {
-      lines.push('At your high marginal rate (35%+), Traditional contributions provide significant tax savings NOW.')
+      roth_vs_traditional = 'traditional'
+      roth_vs_traditional_reason = 'High combined rate (35%+). Traditional contributions provide significant upfront tax savings.'
     } else if (combined >= 0.25) {
-      lines.push('Moderate bracket — a mix of Roth and Traditional is optimal.')
+      roth_vs_traditional = 'mix'
+      roth_vs_traditional_reason = 'Moderate bracket. A mix of Roth and Traditional is optimal.'
     } else {
-      lines.push('Lower bracket — Roth contributions are favored.')
+      roth_vs_traditional = 'roth'
+      roth_vs_traditional_reason = 'Lower bracket. Roth contributions are favored — pay tax now at low rates.'
     }
 
-    return lines.join('\n')
+    return {
+      filing_status: profile.tax.filing_status,
+      state: profile.tax.state,
+      agi,
+      additional_income_modeled: additional_income,
+      marginal_federal_rate: parseFloat((marginalRate * 100).toFixed(1)),
+      effective_federal_rate: parseFloat((effectiveFederal * 100).toFixed(1)),
+      marginal_state_rate: parseFloat((stateRate * 100).toFixed(1)),
+      combined_marginal_rate: parseFloat((combined * 100).toFixed(1)),
+      ltcg_rate: parseFloat((profile.tax.long_term_cap_gains_rate * 100).toFixed(1)),
+      niit_applies: agi > 200000,
+      roth_vs_traditional,
+      roth_vs_traditional_reason,
+      summary: `${(marginalRate * 100).toFixed(0)}% federal + ${(stateRate * 100).toFixed(1)}% state = ${(combined * 100).toFixed(1)}% combined marginal rate. Recommendation: ${roth_vs_traditional === 'mix' ? 'mix Roth and Traditional' : roth_vs_traditional.toUpperCase()}.`,
+    }
   },
 })
 
 export const detectIdleCash = tool({
   description:
-    'Analyze cash holdings to detect money sitting idle beyond the emergency fund target. Calculates opportunity cost and suggests deployment.',
+    'Analyze cash holdings to detect money sitting idle beyond the emergency fund target. Returns opportunity cost and a prioritized deployment plan.',
   inputSchema: zodSchema(z.object({})),
   execute: async () => {
     const profile = loadProfile()
     const cash = totalCash(profile)
     const excess = excessCash(profile)
 
-    const lines: string[] = ['=== Idle Cash Detection ===\n']
-    lines.push(`Total Cash Holdings: $${cash.toLocaleString()}`)
-    lines.push(`Emergency Fund Target: $${profile.target_emergency_fund.toLocaleString()}`)
-    lines.push(`Excess Cash: $${excess.toLocaleString()}\n`)
+    const cash_accounts = profile.accounts
+      .filter(a => a.tax_treatment === 'cash')
+      .map(a => ({ name: a.name, balance: a.balance }))
 
-    lines.push('Cash Account Breakdown:')
-    for (const acc of profile.accounts.filter(a => a.tax_treatment === 'cash')) {
-      lines.push(`  ${acc.name}: $${acc.balance.toLocaleString()}`)
-    }
-    lines.push('')
+    const opportunity_cost_annual = excess > 0 ? Math.round(excess * (0.07 - 0.045)) : 0
 
-    if (excess <= 0) {
-      lines.push('Cash position is appropriate. No idle money detected.')
-      return lines.join('\n')
-    }
-
-    const opportunityCost = excess * (0.07 - 0.045)
-    lines.push(`$${excess.toLocaleString()} is sitting idle beyond your emergency fund.`)
-    lines.push(`  Estimated annual opportunity cost: $${Math.round(opportunityCost).toLocaleString()}`)
-    lines.push('  (assuming 7% market return vs 4.5% HYSA rate)\n')
-
-    lines.push('Recommended deployment priority:')
-    let remaining = excess
-    const priorities: ['tax_free' | 'tax_deferred' | 'taxable', string][] = [
-      ['tax_free', 'Tax-Free (highest efficiency)'],
-      ['tax_deferred', 'Tax-Deferred'],
-      ['taxable', 'Taxable (lowest priority)'],
-    ]
-    for (const [treatment, label] of priorities) {
-      if (remaining <= 0) break
-      for (const acc of profile.accounts.filter(
-        a => a.tax_treatment === treatment &&
-          a.annual_contribution_limit !== null &&
-          a.ytd_contribution < a.annual_contribution_limit!
-      )) {
-        if (remaining <= 0) break
-        const capacity = acc.annual_contribution_limit! - acc.ytd_contribution
-        const deploy = Math.min(remaining, capacity)
-        if (deploy > 0) { lines.push(`  → $${deploy.toLocaleString()} → ${acc.name} (${label})`); remaining -= deploy }
+    const deployment_plan: { account: string; amount: number; tax_treatment: string; priority: number }[] = []
+    if (excess > 0) {
+      let remaining = excess
+      let priority = 1
+      const order: Array<'tax_free' | 'tax_deferred' | 'taxable'> = ['tax_free', 'tax_deferred', 'taxable']
+      for (const treatment of order) {
+        for (const acc of profile.accounts.filter(
+          a => a.tax_treatment === treatment &&
+            a.annual_contribution_limit !== null &&
+            a.ytd_contribution < a.annual_contribution_limit!
+        )) {
+          if (remaining <= 0) break
+          const capacity = acc.annual_contribution_limit! - acc.ytd_contribution
+          const deploy = Math.min(remaining, capacity)
+          if (deploy > 0) {
+            deployment_plan.push({ account: acc.name, amount: deploy, tax_treatment: treatment, priority })
+            remaining -= deploy
+          }
+          priority++
+        }
+      }
+      if (remaining > 0) {
+        deployment_plan.push({ account: 'Brokerage (taxable)', amount: remaining, tax_treatment: 'taxable', priority })
       }
     }
-    if (remaining > 0) lines.push(`  → $${remaining.toLocaleString()} → Brokerage (all tax-advantaged space filled)`)
 
-    return lines.join('\n')
+    return {
+      total_cash: cash,
+      emergency_fund_target: profile.target_emergency_fund,
+      excess_cash: excess,
+      cash_accounts,
+      opportunity_cost_annual,
+      opportunity_cost_note: '7% market return vs 4.5% HYSA',
+      idle_cash_detected: excess > 0,
+      deployment_plan,
+      summary: excess <= 0
+        ? 'Cash position is appropriate. No idle money detected.'
+        : `$${excess.toLocaleString()} idle beyond emergency fund. Estimated annual opportunity cost: $${opportunity_cost_annual.toLocaleString()}. Deploy across ${deployment_plan.length} account(s).`,
+    }
   },
 })
 
 export const suggestRebalancing = tool({
   description:
-    'Generate specific rebalancing recommendations based on target allocation vs actual, contribution pace, and idle cash.',
+    'Generate rebalancing recommendations based on allocation drift, contribution pace, and idle cash. Returns prioritized action items and a monthly plan.',
   inputSchema: zodSchema(z.object({})),
   execute: async () => {
     const profile = loadProfile()
@@ -221,54 +240,69 @@ export const suggestRebalancing = tool({
     const monthsLeft = 12 - profile.current_month
     const excess = excessCash(profile)
 
-    const lines: string[] = ['=== Rebalancing Recommendations ===\n']
-    const recs: { priority: number; msg: string }[] = []
+    const actions: { priority: 'high' | 'medium'; type: 'drift' | 'deploy_cash' | 'increase_contributions'; account: string; message: string; drift_pct?: number; dollar_amount?: number }[] = []
 
-    lines.push('--- Allocation Drift ---')
     for (const account of profile.accounts) {
       const actualPct = total > 0 ? (account.balance / total) * 100 : 0
       const drift = actualPct - account.target_allocation_pct
       if (Math.abs(drift) > 2.0) {
-        const dir = drift > 0 ? 'OVER' : 'UNDER'
         const dollarDrift = Math.abs((drift / 100) * total)
-        recs.push({
-          priority: Math.abs(drift) > 5 ? 1 : 2,
-          msg: `${dir}-allocated: ${account.name} (${actualPct.toFixed(1)}% vs ${account.target_allocation_pct}% target, $${Math.round(dollarDrift).toLocaleString()} drift)`,
+        actions.push({
+          priority: Math.abs(drift) > 5 ? 'high' : 'medium',
+          type: 'drift',
+          account: account.name,
+          message: `${drift > 0 ? 'Over' : 'Under'}-allocated by ${Math.abs(drift).toFixed(1)}pp ($${Math.round(dollarDrift).toLocaleString()})`,
+          drift_pct: parseFloat(drift.toFixed(2)),
+          dollar_amount: Math.round(dollarDrift),
         })
       }
     }
 
-    if (excess > 500) recs.push({ priority: 1, msg: `DEPLOY: $${excess.toLocaleString()} excess cash beyond emergency fund` })
+    if (excess > 500) {
+      actions.push({
+        priority: 'high',
+        type: 'deploy_cash',
+        account: 'Cash',
+        message: `Deploy $${excess.toLocaleString()} excess cash`,
+        dollar_amount: excess,
+      })
+    }
 
     for (const account of profile.accounts) {
       if (account.annual_contribution_limit === null) continue
       const actualPct = account.ytd_contribution / account.annual_contribution_limit
       if (actualPct < expectedPct - 0.1) {
         const remaining = account.annual_contribution_limit - account.ytd_contribution
-        const monthlyNeeded = monthsLeft > 0 ? remaining / monthsLeft : remaining
-        recs.push({ priority: 1, msg: `INCREASE: ${account.name} needs $${Math.round(monthlyNeeded).toLocaleString()}/mo to max by year-end` })
+        const monthlyNeeded = monthsLeft > 0 ? Math.round(remaining / monthsLeft) : remaining
+        actions.push({
+          priority: 'high',
+          type: 'increase_contributions',
+          account: account.name,
+          message: `Increase to $${monthlyNeeded.toLocaleString()}/mo to max by year-end`,
+          dollar_amount: monthlyNeeded,
+        })
       }
     }
 
-    recs.sort((a, b) => a.priority - b.priority)
-    if (!recs.length) {
-      lines.push('  All allocations within 2% of target. No rebalancing needed.')
-    } else {
-      lines.push(`  Found ${recs.length} action items:\n`)
-      for (const r of recs) {
-        lines.push(`  [${r.priority === 1 ? 'HIGH' : 'MEDIUM'}] ${r.msg}`)
-      }
-    }
+    actions.sort((a, b) => (a.priority === 'high' ? -1 : 1) - (b.priority === 'high' ? -1 : 1))
 
-    lines.push('\n--- Monthly Action Plan ---')
+    const monthly_plan: string[] = []
     if (monthsLeft > 0 && excess > 0) {
-      lines.push(`  Step 1: Move $${Math.min(excess, 2150).toLocaleString()} excess cash → HSA (if capacity remains)`)
-      lines.push('  Step 2: Increase 401(k) deferral to max by December')
-      lines.push('  Step 3: Invest remainder in brokerage (tax-efficient funds)')
+      monthly_plan.push(`Move $${Math.min(excess, 2150).toLocaleString()} excess cash to HSA (if capacity remains)`)
+      monthly_plan.push('Increase 401(k) deferral to max by December')
+      monthly_plan.push('Invest remainder in brokerage using tax-efficient index funds')
     } else {
-      lines.push('  Continue current contribution rates — you\'re on track.')
+      monthly_plan.push('Continue current contribution rates — you\'re on track')
     }
 
-    return lines.join('\n')
+    return {
+      total_portfolio: total,
+      actions,
+      monthly_plan,
+      rebalancing_needed: actions.length > 0,
+      summary: actions.length === 0
+        ? 'All allocations within 2% of target. No rebalancing needed.'
+        : `${actions.filter(a => a.priority === 'high').length} high-priority and ${actions.filter(a => a.priority === 'medium').length} medium-priority actions identified.`,
+    }
   },
 })

@@ -25,49 +25,68 @@ const PLACEMENT_RULES: Record<AssetClass, PlacementRule> = {
 }
 
 export const getPlacementRules = tool({
-  description: 'Get the optimal account placement rules for asset classes. Explains WHY each asset class should go in specific account types to minimize tax drag.',
+  description: 'Get optimal account placement rules for asset classes. Returns structured data on which account types minimize tax drag for each asset class.',
   inputSchema: zodSchema(z.object({
-    asset_class: z.string().optional().describe('Specific asset class to look up (e.g. "us_bonds"). Leave empty to see all.'),
+    asset_class: z.string().optional().describe('Specific asset class to look up. Leave empty to get all.'),
   })),
   execute: async ({ asset_class }) => {
-    const lines: string[] = ['=== Asset Location Placement Rules ===\n']
-    lines.push('Principle: Place tax-INefficient assets in tax-sheltered accounts.\n')
-
     if (asset_class) {
       const rule = PLACEMENT_RULES[asset_class as AssetClass]
-      if (!rule) return `Unknown asset class: '${asset_class}'. Valid: ${Object.keys(PLACEMENT_RULES).join(', ')}`
-      lines.push(`Asset Class: ${asset_class}`)
-      lines.push(`  Preferred Account: ${rule.preferred ?? 'Any'}`)
-      lines.push(`  Acceptable: ${rule.acceptable ?? 'Any'}`)
-      lines.push(`  Avoid: ${rule.avoid ?? 'None'}`)
-      lines.push(`  Tax Drag Factor: ${(rule.tax_drag_factor * 100).toFixed(0)}%`)
-      lines.push(`  Rationale: ${rule.reason}`)
-    } else {
-      lines.push(`${'Asset Class'.padEnd(25)} ${'Preferred'.padEnd(15)} ${'Acceptable'.padEnd(15)} ${'Avoid'.padEnd(15)} Drag`)
-      lines.push('-'.repeat(80))
-      for (const [ac, rule] of Object.entries(PLACEMENT_RULES)) {
-        lines.push(
-          `  ${ac.padEnd(23)} ${(rule.preferred ?? 'Any').padEnd(15)} ${(rule.acceptable ?? 'Any').padEnd(15)} ${(rule.avoid ?? '—').padEnd(15)} ${(rule.tax_drag_factor * 100).toFixed(0)}%`
-        )
+      if (!rule) {
+        return {
+          error: `Unknown asset class: '${asset_class}'`,
+          valid_asset_classes: Object.keys(PLACEMENT_RULES),
+        }
       }
-      lines.push('\nSummary:')
-      lines.push('  Tax-Deferred: Bonds, REITs, TIPS, Commodities')
-      lines.push('  Tax-Free (Roth): US equities, small-cap, crypto')
-      lines.push('  Taxable: International equities (foreign tax credit)')
+      return {
+        asset_class,
+        preferred: rule.preferred,
+        acceptable: rule.acceptable,
+        avoid: rule.avoid,
+        tax_drag_factor_pct: parseFloat((rule.tax_drag_factor * 100).toFixed(0)),
+        reason: rule.reason,
+        summary: `${asset_class}: preferred in ${rule.preferred ?? 'any'}, avoid ${rule.avoid ?? 'none'}. Tax drag factor: ${(rule.tax_drag_factor * 100).toFixed(0)}%.`,
+      }
     }
-    return lines.join('\n')
+
+    const rules = Object.entries(PLACEMENT_RULES).map(([ac, rule]) => ({
+      asset_class: ac,
+      preferred: rule.preferred,
+      acceptable: rule.acceptable,
+      avoid: rule.avoid,
+      tax_drag_factor_pct: parseFloat((rule.tax_drag_factor * 100).toFixed(0)),
+      reason: rule.reason,
+    }))
+
+    return {
+      rules,
+      principles: [
+        'Tax-Deferred (401k/IRA): bonds, REITs, TIPS, commodities — high ordinary income',
+        'Tax-Free (Roth): US equities, small-cap, crypto — highest growth potential',
+        'Taxable: international equities — claim foreign tax credit',
+      ],
+      summary: `${rules.length} asset class placement rules. Highest drag: REITs (90%), US bonds (85%), TIPS (80%).`,
+    }
   },
 })
 
 export const optimizeAssetLocation = tool({
-  description: 'Analyze current holdings and recommend optimal placement changes to reduce tax drag.',
+  description: 'Analyze current holdings and recommend optimal placement changes to reduce tax drag. Returns misplacements ranked by severity.',
   inputSchema: zodSchema(z.object({})),
   execute: async () => {
     const profile = loadProfile()
-    const lines: string[] = ['=== Asset Location Optimization ===\n']
 
-    const misplacements: { ticker: string; accountName: string; current: string; preferred: string | null; severity: string; reason: string; dragFactor: number }[] = []
-    const wellPlaced: string[] = []
+    const misplacements: {
+      ticker: string
+      account: string
+      current_treatment: string
+      preferred_treatment: string | null
+      severity: 'high' | 'medium'
+      tax_drag_factor_pct: number
+      reason: string
+      action: string
+    }[] = []
+    const well_placed: { ticker: string; account: string; asset_class: string }[] = []
 
     for (const account of profile.accounts) {
       if (account.tax_treatment === 'cash') continue
@@ -76,53 +95,70 @@ export const optimizeAssetLocation = tool({
         if (!rule) continue
         const current = account.tax_treatment
         if (current === rule.avoid) {
-          misplacements.push({ ticker: holding.ticker, accountName: account.name, current, preferred: rule.preferred, severity: 'HIGH', reason: rule.reason, dragFactor: rule.tax_drag_factor })
+          misplacements.push({
+            ticker: holding.ticker,
+            account: account.name,
+            current_treatment: current,
+            preferred_treatment: rule.preferred,
+            severity: 'high',
+            tax_drag_factor_pct: parseFloat((rule.tax_drag_factor * 100).toFixed(0)),
+            reason: rule.reason,
+            action: current === 'taxable'
+              ? `For new purchases, buy ${holding.ticker} in ${rule.preferred} accounts. Hold existing shares to avoid taxable event.`
+              : `Exchange within account or redirect future contributions to ${rule.preferred}.`,
+          })
         } else if (current !== rule.preferred && current !== rule.acceptable) {
-          misplacements.push({ ticker: holding.ticker, accountName: account.name, current, preferred: rule.preferred, severity: 'MEDIUM', reason: rule.reason, dragFactor: rule.tax_drag_factor })
+          misplacements.push({
+            ticker: holding.ticker,
+            account: account.name,
+            current_treatment: current,
+            preferred_treatment: rule.preferred,
+            severity: 'medium',
+            tax_drag_factor_pct: parseFloat((rule.tax_drag_factor * 100).toFixed(0)),
+            reason: rule.reason,
+            action: `Redirect future contributions of ${holding.ticker} to ${rule.preferred} accounts.`,
+          })
         } else {
-          wellPlaced.push(holding.ticker)
+          well_placed.push({ ticker: holding.ticker, account: account.name, asset_class: holding.asset_class })
         }
       }
     }
 
-    lines.push(`Analyzed ${wellPlaced.length + misplacements.length} holdings.\n`)
-    if (!misplacements.length) { lines.push('All holdings are optimally placed.'); return lines.join('\n') }
+    misplacements.sort((a, b) => b.tax_drag_factor_pct - a.tax_drag_factor_pct)
 
-    lines.push(`Found ${misplacements.length} suboptimal placements:\n`)
-    misplacements.sort((a, b) => b.dragFactor - a.dragFactor)
-
-    for (let i = 0; i < misplacements.length; i++) {
-      const mp = misplacements[i]
-      lines.push(`  ${i + 1}. [${mp.severity}] ${mp.ticker} (${mp.current})`)
-      lines.push(`     Currently in: ${mp.accountName}`)
-      lines.push(`     Should be in: ${mp.preferred ?? 'Any'}`)
-      lines.push(`     Reason: ${mp.reason}\n`)
+    return {
+      total_holdings_analyzed: well_placed.length + misplacements.length,
+      misplacements,
+      well_placed,
+      optimization_needed: misplacements.length > 0,
+      summary: misplacements.length === 0
+        ? 'All holdings are optimally placed.'
+        : `${misplacements.length} suboptimal placement(s) found. ${misplacements.filter(m => m.severity === 'high').length} high severity, ${misplacements.filter(m => m.severity === 'medium').length} medium.`,
     }
-
-    lines.push('--- Suggested Moves ---')
-    for (const mp of misplacements) {
-      if (mp.current === 'taxable') {
-        lines.push(`  ${mp.ticker}: For NEW purchases, buy in ${mp.preferred} accounts. Hold existing shares.`)
-      } else {
-        lines.push(`  ${mp.ticker}: Exchange within account or redirect future contributions to ${mp.preferred}.`)
-      }
-    }
-    return lines.join('\n')
   },
 })
 
 export const calculateTaxDrag = tool({
-  description: 'Calculate the annual tax drag of current holdings. Shows dollar cost of suboptimal account placement.',
+  description: 'Calculate the annual tax drag of current holdings. Returns dollar cost of suboptimal account placement per holding.',
   inputSchema: zodSchema(z.object({
     ticker: z.string().optional().describe('Specific ticker to analyze. Leave empty for all holdings.'),
   })),
   execute: async ({ ticker }) => {
     const profile = loadProfile()
-    const lines: string[] = ['=== Tax Drag Analysis ===\n']
-    lines.push(`${'Ticker'.padEnd(8)} ${'Account'.padEnd(22)} ${'Value'.padStart(10)} ${'Div Yield'.padStart(10)} ${'Tax Drag'.padStart(10)} ${'Optimal?'.padStart(8)}`)
-    lines.push('-'.repeat(75))
 
-    let totalDrag = 0
+    const holdings: {
+      ticker: string
+      account: string
+      tax_treatment: string
+      estimated_value: number
+      annual_dividends: number
+      annual_gains: number
+      annual_drag: number
+      optimally_placed: boolean
+    }[] = []
+
+    let total_annual_drag = 0
+
     for (const account of profile.accounts) {
       for (const holding of account.holdings) {
         if (ticker && holding.ticker.toUpperCase() !== ticker.toUpperCase()) continue
@@ -137,28 +173,43 @@ export const calculateTaxDrag = tool({
         } else if (account.tax_treatment === 'cash') {
           drag = annualDivs * 0.25
         }
-        totalDrag += drag
+        total_annual_drag += drag
 
         const rule = PLACEMENT_RULES[holding.asset_class]
-        const optimal = rule && (account.tax_treatment === rule.preferred || account.tax_treatment === rule.acceptable) ? '✓' : '✗'
-        lines.push(`  ${holding.ticker.padEnd(6)} ${account.name.padEnd(22)} $${estValue.toLocaleString().padStart(8)} ${holding.dividend_yield.toFixed(1).padStart(8)}% $${Math.round(drag).toLocaleString().padStart(8)} ${optimal.padStart(6)}`)
+        const optimally_placed = !rule || account.tax_treatment === rule.preferred || account.tax_treatment === rule.acceptable
+
+        holdings.push({
+          ticker: holding.ticker,
+          account: account.name,
+          tax_treatment: account.tax_treatment,
+          estimated_value: Math.round(estValue),
+          annual_dividends: Math.round(annualDivs),
+          annual_gains: Math.round(annualGains),
+          annual_drag: Math.round(drag),
+          optimally_placed,
+        })
       }
     }
 
-    lines.push('-'.repeat(75))
-    lines.push(`  Total estimated annual tax drag: $${Math.round(totalDrag).toLocaleString()}`)
-    return lines.join('\n')
+    holdings.sort((a, b) => b.annual_drag - a.annual_drag)
+
+    return {
+      holdings,
+      total_annual_drag: Math.round(total_annual_drag),
+      worst_offenders: holdings.filter(h => !h.optimally_placed && h.annual_drag > 0).slice(0, 3),
+      summary: `Total estimated annual tax drag: $${Math.round(total_annual_drag).toLocaleString()}. ${holdings.filter(h => !h.optimally_placed).length} holding(s) suboptimally placed.`,
+    }
   },
 })
 
 export const analyzeHoldings = tool({
-  description: 'Overview of all holdings grouped by asset class. Shows concentration risk and diversification gaps.',
+  description: 'Overview of all holdings grouped by asset class. Returns concentration risk, diversification gaps, and total invested.',
   inputSchema: zodSchema(z.object({})),
   execute: async () => {
     const profile = loadProfile()
-    const lines: string[] = ['=== Holdings Analysis ===\n']
 
-    const classTotals: Record<string, { value: number; tickers: string[] }> = {}
+    const classTotals: Record<string, { value: number; tickers: string[]; accounts: string[] }> = {}
+    const tickerTotals: Record<string, { value: number; accounts: string[] }> = {}
     let totalInvested = 0
 
     for (const account of profile.accounts) {
@@ -166,47 +217,52 @@ export const analyzeHoldings = tool({
       for (const holding of account.holdings) {
         const estValue = holding.shares * (holding.cost_basis_per_share > 0 ? holding.cost_basis_per_share : 100)
         totalInvested += estValue
-        if (!classTotals[holding.asset_class]) classTotals[holding.asset_class] = { value: 0, tickers: [] }
+
+        if (!classTotals[holding.asset_class]) classTotals[holding.asset_class] = { value: 0, tickers: [], accounts: [] }
         classTotals[holding.asset_class].value += estValue
-        classTotals[holding.asset_class].tickers.push(holding.ticker)
+        if (!classTotals[holding.asset_class].tickers.includes(holding.ticker))
+          classTotals[holding.asset_class].tickers.push(holding.ticker)
+        if (!classTotals[holding.asset_class].accounts.includes(account.name))
+          classTotals[holding.asset_class].accounts.push(account.name)
+
+        if (!tickerTotals[holding.ticker]) tickerTotals[holding.ticker] = { value: 0, accounts: [] }
+        tickerTotals[holding.ticker].value += estValue
+        tickerTotals[holding.ticker].accounts.push(account.name)
       }
     }
 
-    lines.push(`Total Invested (excl. cash): $${totalInvested.toLocaleString()}\n`)
-    lines.push(`${'Asset Class'.padEnd(25)} ${'Value'.padStart(12)} ${'Allocation'.padStart(12)} ${'Holdings'.padStart(10)}`)
-    lines.push('-'.repeat(65))
+    const by_asset_class = Object.entries(classTotals)
+      .map(([asset_class, data]) => ({
+        asset_class,
+        value: Math.round(data.value),
+        allocation_pct: parseFloat((totalInvested > 0 ? (data.value / totalInvested) * 100 : 0).toFixed(1)),
+        tickers: data.tickers,
+        accounts: data.accounts,
+      }))
+      .sort((a, b) => b.value - a.value)
 
-    for (const [ac, data] of Object.entries(classTotals).sort((a, b) => b[1].value - a[1].value)) {
-      const pct = totalInvested > 0 ? (data.value / totalInvested) * 100 : 0
-      lines.push(`  ${ac.padEnd(23)} $${data.value.toLocaleString().padStart(10)} ${pct.toFixed(1).padStart(10)}% ${data.tickers.length.toString().padStart(8)}`)
-    }
+    const concentration_risks = Object.entries(tickerTotals)
+      .filter(([, data]) => data.value / totalInvested > 0.15)
+      .map(([ticker, data]) => ({
+        ticker,
+        value: Math.round(data.value),
+        allocation_pct: parseFloat(((data.value / totalInvested) * 100).toFixed(1)),
+        accounts: data.accounts,
+        recommendation: 'Consider diversifying — single holding above 15% threshold',
+      }))
+      .sort((a, b) => b.value - a.value)
 
-    lines.push('\n--- Concentration Risks ---')
-    const tickerTotals: Record<string, number> = {}
-    for (const account of profile.accounts) {
-      for (const h of account.holdings) {
-        const v = h.shares * (h.cost_basis_per_share > 0 ? h.cost_basis_per_share : 100)
-        tickerTotals[h.ticker] = (tickerTotals[h.ticker] ?? 0) + v
-      }
-    }
-    const concentrated = Object.entries(tickerTotals).filter(([, v]) => v / totalInvested > 0.15)
-    if (concentrated.length) {
-      for (const [t, v] of concentrated.sort((a, b) => b[1] - a[1])) {
-        lines.push(`  ${t}: $${v.toLocaleString()} (${((v / totalInvested) * 100).toFixed(1)}%) — consider diversifying above 15%`)
-      }
-    } else {
-      lines.push('  No single holding exceeds 15% of portfolio.')
-    }
-
-    lines.push('\n--- Diversification Gaps ---')
     const core: AssetClass[] = ['us_equity_large', 'intl_equity_developed', 'us_bonds']
-    const missing = core.filter(c => !classTotals[c])
-    if (missing.length) {
-      for (const c of missing) lines.push(`  Missing: ${c} — consider adding for diversification`)
-    } else {
-      lines.push('  Core asset classes all represented.')
-    }
+    const gaps = core
+      .filter(c => !classTotals[c])
+      .map(c => ({ missing_asset_class: c, recommendation: `Add ${c.replace(/_/g, ' ')} for core diversification` }))
 
-    return lines.join('\n')
+    return {
+      total_invested: Math.round(totalInvested),
+      by_asset_class,
+      concentration_risks,
+      diversification_gaps: gaps,
+      summary: `$${Math.round(totalInvested).toLocaleString()} invested across ${by_asset_class.length} asset classes. ${concentration_risks.length} concentration risk(s). ${gaps.length} diversification gap(s).`,
+    }
   },
 })
