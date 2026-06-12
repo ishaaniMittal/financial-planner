@@ -11,6 +11,8 @@ import { getPlacementRules, optimizeAssetLocation, calculateTaxDrag, analyzeHold
 import { visualize, saveToReport } from '@/lib/tools/visualization'
 import { projectRetirement, analyzeGoalFunding } from '@/lib/tools/planning'
 import { checkEmployerMatch, checkRothEligibility, analyzeAssetClassAllocation } from '@/lib/tools/portfolio-checks'
+import { analyzeFundOverlap } from '@/lib/tools/fund-analysis'
+import { planRsuTaxes, planRothConversion } from '@/lib/tools/advanced-tax'
 
 export const maxDuration = 60
 
@@ -38,6 +40,9 @@ export async function POST(req: Request) {
       check_employer_match: checkEmployerMatch,
       check_roth_eligibility: checkRothEligibility,
       analyze_asset_class_allocation: analyzeAssetClassAllocation,
+      analyze_fund_overlap: analyzeFundOverlap,
+      plan_rsu_taxes: planRsuTaxes,
+      plan_roth_conversion: planRothConversion,
       visualize,
       save_to_report: saveToReport,
     },

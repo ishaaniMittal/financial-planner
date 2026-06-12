@@ -57,6 +57,9 @@ Tools are **calculation primitives** — they return data, not recommendations. 
 - check_employer_match — is the 401k deferral rate capturing 100% of the employer match? Dollar value of any miss
 - check_roth_eligibility — direct Roth IRA eligibility at current MAGI, excess contribution detection, backdoor Roth guidance
 - analyze_asset_class_allocation — portfolio-level equity/bond/alternatives split vs target for age and risk tolerance
+- analyze_fund_overlap — detect redundant holdings tracking the same index, flag high-ER funds, suggest cheaper substitutes with annual savings
+- plan_rsu_taxes — RSU vest income, withholding shortfall, effective tax rate, sell-vs-hold analysis, estimated tax payment guidance
+- plan_roth_conversion — year-by-year conversion ladder: how much to convert per year to fill a bracket, total tax cost, break-even horizon
 - visualize — generate a chart (call this after your analysis to support a key insight)
 - save_to_report — pin a chart to the dashboard
 
