@@ -1,6 +1,10 @@
 import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import { loadProfile, holdingMarketValue, holdingCostBasis, isLongTermGain, excessCash, totalCash } from '../profile'
+import {
+  federalMarginalRate, federalTaxOwed, roomInCurrentBracket,
+  ROTH_IRA_PHASEOUT, getBrackets,
+} from '../tax-data'
 
 type Priority = 'critical' | 'high' | 'medium' | 'low'
 
@@ -16,38 +20,6 @@ interface DiagnosticCategory {
   category: string
   score: 'needs_attention' | 'good' | 'not_enough_data'
   findings: Finding[]
-}
-
-// 2025 constants (hardcoded — see TECH_DEBT.md)
-const ROTH_PHASEOUT_SINGLE = { start: 150000, end: 165000 }
-const ROTH_PHASEOUT_MFJ    = { start: 236000, end: 246000 }
-const BRACKETS_SINGLE: [number, number][] = [
-  [11925,0.10],[48475,0.12],[103350,0.22],[197300,0.24],[250525,0.32],[626350,0.35],[Infinity,0.37],
-]
-const BRACKETS_MFJ: [number, number][] = [
-  [23850,0.10],[96950,0.12],[206700,0.22],[394600,0.24],[501050,0.32],[751600,0.35],[Infinity,0.37],
-]
-
-function marginalRate(income: number, mfj: boolean): number {
-  const b = mfj ? BRACKETS_MFJ : BRACKETS_SINGLE
-  for (const [limit, rate] of b) if (income <= limit) return rate
-  return 0.37
-}
-
-function taxOwed(income: number, mfj: boolean): number {
-  const b = mfj ? BRACKETS_MFJ : BRACKETS_SINGLE
-  let tax = 0, prev = 0
-  for (const [limit, rate] of b) {
-    if (income <= limit) { tax += (income - prev) * rate; break }
-    tax += (limit - prev) * rate; prev = limit
-  }
-  return tax
-}
-
-function roomInBracket(income: number, mfj: boolean): number {
-  const b = mfj ? BRACKETS_MFJ : BRACKETS_SINGLE
-  for (const [limit] of b) if (income < limit) return limit - income
-  return 0
 }
 
 function projectPortfolio(pv: number, annual: number, r: number, years: number) {
@@ -72,6 +44,7 @@ Also flags what profile data is missing and what additional information would un
   execute: async ({ annual_return_pct = 7.0 }) => {
     const profile = loadProfile()
     const mfj = profile.tax.filing_status === 'married_filing_jointly'
+    const filingStatus = profile.tax.filing_status
     const agi = profile.tax.estimated_agi
     const stateRate = profile.tax.marginal_state_rate
     const currentMonth = profile.current_month
@@ -161,7 +134,7 @@ Also flags what profile data is missing and what additional information would un
       const findings: Finding[] = []
 
       // Roth eligibility
-      const phaseout = mfj ? ROTH_PHASEOUT_MFJ : ROTH_PHASEOUT_SINGLE
+      const phaseout = ROTH_IRA_PHASEOUT[filingStatus] ?? ROTH_IRA_PHASEOUT.single
       const rothIraAccounts = profile.accounts.filter(a => a.tax_treatment === 'tax_free' && a.name.toLowerCase().includes('ira'))
       const totalRothContrib = rothIraAccounts.reduce((s,a) => s + a.ytd_contribution, 0)
       if (agi >= phaseout.end && totalRothContrib > 0) {
@@ -206,15 +179,15 @@ Also flags what profile data is missing and what additional information would un
 
       // Roth conversion opportunity
       const taxDeferredBalance = profile.accounts.filter(a => a.tax_treatment === 'tax_deferred').reduce((s,a) => s + a.balance, 0)
-      const room = roomInBracket(agi, mfj)
+      const room = roomInCurrentBracket(agi, filingStatus)
       if (taxDeferredBalance > 10000 && room > 5000) {
-        const conversionTax = (taxOwed(agi + room, mfj) - taxOwed(agi, mfj)) + room * stateRate
+        const conversionTax = (federalTaxOwed(agi + room, filingStatus) - federalTaxOwed(agi, filingStatus)) + room * stateRate
         const effectiveRate = conversionTax / room * 100
         findings.push({
           priority: 'medium',
           action: 'Evaluate Roth conversion to fill current bracket',
-          detail: `$${Math.round(room).toLocaleString()} of room remains in your current ${(marginalRate(agi, mfj) * 100).toFixed(0)}% bracket. Converting now at ~${effectiveRate.toFixed(0)}% may be cheaper than RMDs in retirement.`,
-          estimated_impact: `Convert up to $${Math.round(room).toLocaleString()}/yr at ${(marginalRate(agi, mfj) * 100).toFixed(0)}% marginal rate`,
+          detail: `$${Math.round(room).toLocaleString()} of room remains in your current ${(federalMarginalRate(agi, filingStatus) * 100).toFixed(0)}% bracket. Converting now at ~${effectiveRate.toFixed(0)}% may be cheaper than RMDs in retirement.`,
+          estimated_impact: `Convert up to $${Math.round(room).toLocaleString()}/yr at ${(federalMarginalRate(agi, filingStatus) * 100).toFixed(0)}% marginal rate`,
           tool_for_details: 'plan_roth_conversion',
         })
       }
@@ -416,7 +389,7 @@ Also flags what profile data is missing and what additional information would un
       if (rsuIncome > 0) {
         // Withholding shortfall estimate
         const baseAgi = agi - rsuIncome
-        const marginalOnRsu = (taxOwed(agi, mfj) - taxOwed(baseAgi, mfj)) + rsuIncome * stateRate
+        const marginalOnRsu = (federalTaxOwed(agi, filingStatus) - federalTaxOwed(baseAgi, filingStatus)) + rsuIncome * stateRate
         const withheld = rsuIncome * 0.22
         const shortfall = marginalOnRsu - withheld
         if (shortfall > 1000) {
@@ -453,7 +426,7 @@ Also flags what profile data is missing and what additional information would un
             priority: 'medium',
             action: `Max out HSA — $${hsaRemaining.toLocaleString()} remaining`,
             detail: 'HSA is triple tax-advantaged: deductible contributions, tax-free growth, tax-free withdrawals for medical. Best account in the tax code.',
-            estimated_impact: `$${Math.round(hsaRemaining * (marginalRate(agi, mfj) + stateRate)).toLocaleString()} in tax savings`,
+            estimated_impact: `$${Math.round(hsaRemaining * (federalMarginalRate(agi, filingStatus) + stateRate)).toLocaleString()} in tax savings`,
             tool_for_details: 'get_contribution_limits',
           })
         }

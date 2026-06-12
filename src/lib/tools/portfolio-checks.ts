@@ -1,6 +1,7 @@
 import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import { loadProfile, holdingMarketValue } from '../profile'
+import { ROTH_IRA_PHASEOUT } from '../tax-data'
 
 // ---------------------------------------------------------------------------
 // check_employer_match
@@ -103,13 +104,6 @@ deferral rate needed to capture the full match.`,
 // check_roth_eligibility
 // ---------------------------------------------------------------------------
 
-// 2025 Roth IRA MAGI phaseout thresholds
-const ROTH_PHASEOUT_2025 = {
-  single:                  { start: 150000, end: 165000 },
-  married_filing_jointly:  { start: 236000, end: 246000 },
-  married_filing_separately: { start: 0, end: 10000 },
-}
-
 export const checkRothEligibility = tool({
   description: `Check whether the user is eligible to contribute directly to a Roth IRA at their current MAGI.
 Flags if they're in the phaseout range or over the limit (requiring backdoor Roth).
@@ -122,8 +116,8 @@ Returns eligibility status, allowed contribution amount, and backdoor Roth guida
     const profile = loadProfile()
 
     const magi = profile.tax.estimated_agi  // MAGI ≈ AGI for most W-2 earners
-    const filingStatus = profile.tax.filing_status as keyof typeof ROTH_PHASEOUT_2025
-    const phaseout = ROTH_PHASEOUT_2025[filingStatus] ?? ROTH_PHASEOUT_2025.single
+    const filingStatus = profile.tax.filing_status
+    const phaseout = ROTH_IRA_PHASEOUT[filingStatus] ?? ROTH_IRA_PHASEOUT.single
 
     const baseLimit = 7000  // 2025 IRA limit
     const primaryMember = profile.household?.find(h => h.is_primary)
