@@ -195,6 +195,56 @@ export function k401Limit(age: number): number {
   return CONTRIBUTION_LIMITS.k401
 }
 
+// ---------------------------------------------------------------------------
+// Alternative Minimum Tax (AMT) — 2025
+// Source: IRS Rev. Proc. 2024-61
+// ---------------------------------------------------------------------------
+
+export const AMT_EXEMPTION_SINGLE    = 88_100
+export const AMT_EXEMPTION_MFJ       = 137_000
+export const AMT_PHASEOUT_SINGLE     = 626_350   // exemption phases out above this
+export const AMT_PHASEOUT_MFJ        = 1_252_700
+export const AMT_RATE_LOW            = 0.26       // on first $232,600 of AMTI
+export const AMT_RATE_HIGH           = 0.28       // on AMTI above $232,600
+export const AMT_AMTI_BRACKET        = 232_600    // threshold between 26% and 28%
+
+export function amtExemption(filingStatus: string, amti: number): number {
+  const [exempt, phaseout] = filingStatus === 'married_filing_jointly'
+    ? [AMT_EXEMPTION_MFJ, AMT_PHASEOUT_MFJ]
+    : [AMT_EXEMPTION_SINGLE, AMT_PHASEOUT_SINGLE]
+  if (amti <= phaseout) return exempt
+  const reduction = Math.min(exempt, (amti - phaseout) * 0.25)
+  return Math.max(0, exempt - reduction)
+}
+
+/** Tentative AMT before comparing to regular tax. */
+export function tentativeMinimumTax(amti: number, filingStatus: string): number {
+  const exemption = amtExemption(filingStatus, amti)
+  const taxable = Math.max(0, amti - exemption)
+  if (taxable <= AMT_AMTI_BRACKET) return taxable * AMT_RATE_LOW
+  return AMT_AMTI_BRACKET * AMT_RATE_LOW + (taxable - AMT_AMTI_BRACKET) * AMT_RATE_HIGH
+}
+
+// ---------------------------------------------------------------------------
+// Gift tax & education savings — 2025
+// Source: IRS Rev. Proc. 2024-61
+// ---------------------------------------------------------------------------
+
+export const ANNUAL_GIFT_EXCLUSION = 18_000    // per donor per recipient
+export const LIFETIME_ESTATE_EXEMPTION = 13_990_000  // estate + gift tax unified credit
+export const SUPERFUNDING_YEARS = 5            // 529 superfunding election: 5-year gift tax averaging
+
+/** Max 529 superfunding per donor per beneficiary (5x annual exclusion). */
+export const MAX_529_SUPERFUNDING = ANNUAL_GIFT_EXCLUSION * SUPERFUNDING_YEARS  // 90,000
+
+// ---------------------------------------------------------------------------
+// Health savings account (HSA) — already in CONTRIBUTION_LIMITS, re-exported for clarity
+// ---------------------------------------------------------------------------
+
+export const HSA_LIMIT_INDIVIDUAL = 4_300
+export const HSA_LIMIT_FAMILY     = 8_550
+export const HSA_CATCHUP_55       = 1_000
+
 /** Allowed Roth IRA direct contribution given MAGI and filing status. Returns 0 if ineligible. */
 export function allowedRothContribution(magi: number, filingStatus: string, age: number): number {
   const phaseout = ROTH_IRA_PHASEOUT[filingStatus] ?? ROTH_IRA_PHASEOUT.single

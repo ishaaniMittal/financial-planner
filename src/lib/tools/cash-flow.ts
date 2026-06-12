@@ -1,27 +1,15 @@
 import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import { loadProfile, excessCash, totalCash } from '../profile'
-
-const FEDERAL_BRACKETS_SINGLE_2025: [number, number][] = [
-  [11925, 0.10], [48475, 0.12], [103350, 0.22], [197300, 0.24],
-  [250525, 0.32], [626350, 0.35], [Infinity, 0.37],
-]
-const FEDERAL_BRACKETS_MFJ_2025: [number, number][] = [
-  [23850, 0.10], [96950, 0.12], [206700, 0.22], [394600, 0.24],
-  [501050, 0.32], [751600, 0.35], [Infinity, 0.37],
-]
-const STATE_RATES: Record<string, number> = {
-  CA: 0.093, NY: 0.0685, TX: 0.0, WA: 0.0, FL: 0.0,
-  IL: 0.0495, MA: 0.05, NJ: 0.0675, CO: 0.044,
-}
+import { getBrackets, getStateRate, federalTaxOwed, federalMarginalRate, TAX_YEAR } from '../tax-data'
 
 export const getContributionLimits = tool({
   description:
     'Get IRS contribution limits for all account types. Returns annual max, YTD contributions, remaining capacity, and pace status for each account.',
   inputSchema: zodSchema(z.object({
-    year: z.number().optional().describe('Tax year. Defaults to 2025.'),
+    year: z.number().optional().describe(`Tax year. Defaults to ${TAX_YEAR}.`),
   })),
-  execute: async ({ year = 2025 }) => {
+  execute: async ({ year = TAX_YEAR }) => {
     const profile = loadProfile()
     const expectedPct = profile.current_month / 12
     const monthsLeft = 12 - profile.current_month
@@ -127,17 +115,9 @@ export const calculateTaxBracket = tool({
   execute: async ({ additional_income = 0 }) => {
     const profile = loadProfile()
     const agi = profile.tax.estimated_agi + additional_income
-    const brackets = profile.tax.filing_status === 'married_filing_jointly'
-      ? FEDERAL_BRACKETS_MFJ_2025
-      : FEDERAL_BRACKETS_SINGLE_2025
-
-    let federalTax = 0, prevLimit = 0, marginalRate = 0
-    for (const [limit, rate] of brackets) {
-      if (agi <= limit) { federalTax += (agi - prevLimit) * rate; marginalRate = rate; break }
-      federalTax += (limit - prevLimit) * rate; prevLimit = limit; marginalRate = rate
-    }
-
-    const stateRate = STATE_RATES[profile.tax.state] ?? 0.05
+    const federalTax = federalTaxOwed(agi, profile.tax.filing_status)
+    const marginalRate = federalMarginalRate(agi, profile.tax.filing_status)
+    const stateRate = getStateRate(profile.tax.state)
     const effectiveFederal = agi > 0 ? federalTax / agi : 0
     const combined = marginalRate + stateRate
 

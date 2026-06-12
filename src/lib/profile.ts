@@ -76,6 +76,63 @@ export interface HouseholdMember {
   is_primary: boolean
 }
 
+export interface Dependent {
+  name: string
+  age: number
+  relationship: 'child' | 'spouse' | 'parent' | 'other'
+}
+
+export interface Liability {
+  name: string
+  type: 'mortgage' | 'student_loan' | 'auto_loan' | 'personal_loan' | 'credit_card' | 'other'
+  balance: number
+  interest_rate: number
+  monthly_payment: number
+  remaining_months?: number
+  property_value?: number          // for mortgage — used to compute equity
+}
+
+export interface Benefits {
+  health_plan_type?: 'HDHP' | 'PPO' | 'HMO' | 'EPO'
+  hsa_eligible?: boolean
+  hsa_ytd_contribution?: number
+  fsa_eligible?: boolean
+  fsa_election?: number
+  has_mega_backdoor_roth?: boolean  // plan allows after-tax 401k + in-plan conversion
+  after_tax_401k_ytd?: number       // YTD after-tax (non-Roth) 401k contributions
+  health_plan_monthly_premium?: number
+  health_plan_deductible?: number
+  health_plan_oop_max?: number
+  employer_hsa_contribution?: number
+}
+
+export type StockOptionType = 'ISO' | 'NSO'
+
+export interface StockOptionGrant {
+  grant_id: string
+  ticker: string
+  type: StockOptionType
+  grant_date: string
+  strike_price: number
+  total_shares: number
+  vested_shares: number
+  unvested_shares: number
+  expiration_date?: string
+  early_exercise_eligible?: boolean
+}
+
+export interface SpendingCategory {
+  category: string
+  monthly_amount: number
+}
+
+export interface PlannedMove {
+  from_state: string
+  to_state: string
+  planned_date: string          // ISO date
+  confirmed: boolean
+}
+
 export interface FinancialProfile {
   accounts: Account[]
   monthly_history: MonthlySnapshot[]
@@ -88,6 +145,12 @@ export interface FinancialProfile {
   goals?: Goal[]
   income?: IncomeSources[]
   household?: HouseholdMember[]
+  dependents?: Dependent[]
+  liabilities?: Liability[]
+  benefits?: Benefits
+  stock_options?: StockOptionGrant[]
+  spending?: SpendingCategory[]
+  planned_moves?: PlannedMove[]
 }
 
 const PROFILE_PATH = path.join(process.cwd(), 'profile.json')

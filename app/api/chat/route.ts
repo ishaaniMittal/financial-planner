@@ -14,6 +14,7 @@ import { checkEmployerMatch, checkRothEligibility, analyzeAssetClassAllocation }
 import { analyzeFundOverlap } from '@/lib/tools/fund-analysis'
 import { planRsuTaxes, planRothConversion } from '@/lib/tools/advanced-tax'
 import { runFinancialDiagnostic } from '@/lib/tools/diagnostic'
+import { analyzeMegaBackdoorRoth, compareHealthPlans, planStockOptions, plan529, calculateNetWorth } from '@/lib/tools/benefits-equity'
 
 export const maxDuration = 60
 
@@ -45,6 +46,11 @@ export async function POST(req: Request) {
       plan_rsu_taxes: planRsuTaxes,
       plan_roth_conversion: planRothConversion,
       run_financial_diagnostic: runFinancialDiagnostic,
+      analyze_mega_backdoor_roth: analyzeMegaBackdoorRoth,
+      compare_health_plans: compareHealthPlans,
+      plan_stock_options: planStockOptions,
+      plan_529: plan529,
+      calculate_net_worth: calculateNetWorth,
       visualize,
       save_to_report: saveToReport,
     },

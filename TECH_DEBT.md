@@ -56,3 +56,48 @@ Each entry records what was hardcoded, why, and what a better solution looks lik
 **Trigger to fix:** When integrating real payroll or bank data.
 
 ---
+
+## Hardcoded 529 target education cost default ($350,000)
+
+**File:** `src/lib/tools/benefits-equity.ts` — `plan_529`
+**Added:** 2025-06-12
+
+**What's hardcoded:** Default target education cost of $350,000 (4-year private university in today's dollars). Also hardcodes 7% nominal return assumption.
+
+**Why:** College cost projections require current tuition data and inflation assumptions. College Board publishes annual cost data but no free API exists.
+
+**Better solution:** Integrate College Board trends data or allow user to specify school type (public/private) with a configurable inflation rate. Candidates: College Board Cost Trends, Sallie Mae How America Pays survey.
+
+**Trigger to fix:** When users ask about specific schools or want tuition inflation modeling.
+
+---
+
+## Hardcoded state 529 deduction table
+
+**File:** `src/lib/tools/benefits-equity.ts` — `plan_529`
+**Added:** 2025-06-12
+
+**What's hardcoded:** State tax deduction eligibility and amounts for ~12 states. Most states omitted.
+
+**Why:** No free comprehensive API for 529 state benefits. Manual table for most common states.
+
+**Better solution:** Savingforcollege.com publishes a full state deduction table. Could scrape or find a data provider that covers all 50 states + DC.
+
+**Trigger to fix:** When a user's state isn't in the table and produces wrong results.
+
+---
+
+## Hardcoded PPO comparison defaults in compare_health_plans
+
+**File:** `src/lib/tools/benefits-equity.ts` — `compare_health_plans`
+**Added:** 2025-06-12
+
+**What's hardcoded:** When PPO parameters aren't provided, defaults to HDHP premium + $200/mo, $500 deductible, $3,000 OOP max. Also hardcodes 20% coinsurance assumption.
+
+**Why:** PPO plan details are employer-specific and not available without benefits enrollment data.
+
+**Better solution:** Read employer benefits from a structured benefits file or HR integration. Both plans should come from the user's actual open enrollment options.
+
+**Trigger to fix:** When user provides PPO plan details for accurate comparison.
+
+---

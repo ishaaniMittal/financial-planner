@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CMD=$(jq -r '.tool_input.command // empty'); if echo \"$CMD\" | grep -qE '^git push'; then COUNT_FILE=\".claude/push_count\"; mkdir -p .claude; COUNT=$(cat \"$COUNT_FILE\" 2>/dev/null || echo 0); COUNT=$((COUNT + 1)); if [ \"$COUNT\" -ge 3 ]; then echo 0 > \"$COUNT_FILE\"; echo \"3 pushes completed. Please run /code-review to identify refactoring and scalability opportunities across the codebase.\"; exit 2; else echo \"$COUNT\" > \"$COUNT_FILE\"; fi; fi",
+            "asyncRewake": true,
+            "rewakeMessage": "Code review reminder after 3 pushes:",
+            "rewakeSummary": "3 pushes reached — time for a code review",
+            "statusMessage": "Checking push count..."
+          }
+        ]
+      }
+    ]
+  }
+}
