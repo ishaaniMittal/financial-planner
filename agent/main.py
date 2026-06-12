@@ -44,9 +44,19 @@ def create_agent() -> Agent:
         max_tokens=8096,
     )
 
+    # Cache the system prompt so repeated calls during testing don't re-process it.
+    # Cached tokens cost ~10% of normal input price; cache TTL is 5 minutes.
+    cached_system_prompt = [
+        {
+            "text": SYSTEM_PROMPT,
+            "type": "text",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
     agent = Agent(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=cached_system_prompt,
         tools=all_tools,
     )
 
