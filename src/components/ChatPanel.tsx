@@ -1,16 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react'
-import Markdown from 'react-markdown'
+'use client'
+
+import { useState } from 'react'
+import { useChat } from '@ai-sdk/react'
+import type { UIMessage } from 'ai'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { VegaChart } from '@/components/VegaChart'
 import { Send, RotateCcw, Bot, User, Loader2 } from 'lucide-react'
-
-interface Message {
-  id: string
-  role: 'user' | 'agent'
-  content: string
-  timestamp: Date
-  visualizations?: Record<string, unknown>[]
-}
+import Markdown from 'react-markdown'
 
 const SUGGESTED_QUESTIONS = [
   "Am I on pace to max all my accounts this year?",
@@ -21,143 +17,82 @@ const SUGGESTED_QUESTIONS = [
   "What does my monthly allocation trend look like?",
 ]
 
-export const ChatPanel: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
+const WELCOME: UIMessage = {
+  id: 'welcome',
+  role: 'assistant',
+  parts: [
     {
-      id: 'welcome',
-      role: 'agent',
-      content: "I'm your financial planning agent. I can analyze your cash flow, optimize asset location, and visualize your data with the best chart for each question. Try asking something below.",
-      timestamp: new Date(),
+      type: 'text',
+      text: "I'm your financial planning agent. I can analyze your cash flow, optimize asset location, and visualize your data. Try asking something below.",
     },
-  ])
+  ],
+}
+
+/** Concatenate all text parts of a message into a single string. */
+function messageText(msg: UIMessage): string {
+  return msg.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('')
+}
+
+function extractVisualizations(content: string): { clean: string; specs: Record<string, unknown>[] } {
+  const specs: Record<string, unknown>[] = []
+  const clean = content.replace(/```vega-lite\n([\s\S]*?)```/g, (_match, json) => {
+    try { specs.push(JSON.parse(json.trim())) } catch { /* ignore */ }
+    return '[Chart rendered below]'
+  })
+  return { clean, specs }
+}
+
+export const ChatPanel: React.FC = () => {
+  const { messages, sendMessage, setMessages, status } = useChat({
+    messages: [WELCOME],
+  })
   const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [isConnected, setIsConnected] = useState<boolean | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const isLoading = status === 'submitted' || status === 'streaming'
 
-  useEffect(() => {
-    fetch('http://localhost:8000/api/health')
-      .then((res) => res.json())
-      .then(() => setIsConnected(true))
-      .catch(() => setIsConnected(false))
-  }, [])
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  const sendMessage = async (text: string) => {
+  const submit = (text: string) => {
     if (!text.trim() || isLoading) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: text.trim(),
-      timestamp: new Date(),
-    }
-
-    setMessages((prev) => [...prev, userMessage])
+    sendMessage({ text: text.trim() })
     setInput('')
-    setIsLoading(true)
-
-    try {
-      const res = await fetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text.trim() }),
-      })
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`)
-      }
-
-      const data = await res.json()
-
-      const agentMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: data.response,
-        timestamp: new Date(),
-        visualizations: data.visualizations?.length > 0 ? data.visualizations : undefined,
-      }
-
-      setMessages((prev) => [...prev, agentMessage])
-      setIsConnected(true)
-    } catch {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: `Unable to reach the agent API. Make sure the server is running:\n\n\`uvicorn agent.server:app --reload --port 8000\``,
-        timestamp: new Date(),
-      }
-      setMessages((prev) => [...prev, errorMessage])
-      setIsConnected(false)
-    } finally {
-      setIsLoading(false)
-    }
   }
 
-  const resetChat = async () => {
-    try {
-      await fetch('http://localhost:8000/api/chat/reset', { method: 'POST' })
-    } catch {
-      // Agent might be down, reset UI anyway
-    }
-    setMessages([
-      {
-        id: 'welcome-reset',
-        role: 'agent',
-        content: "Conversation reset. How can I help with your financial planning?",
-        timestamp: new Date(),
-      },
-    ])
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    submit(input)
+  }
+
+  const resetChat = () => {
+    setMessages([{ ...WELCOME, id: 'welcome-reset', parts: [{ type: 'text', text: 'Conversation reset. How can I help with your financial planning?' }] }])
   }
 
   const handlePinChart = async (spec: Record<string, unknown>) => {
     const title = (spec.title as string) || 'Saved Chart'
-    // Infer chart_type from the spec structure
     const chartType = inferChartType(spec)
-
     try {
-      await fetch('http://localhost:8000/api/reports', {
+      await fetch('/api/reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chart_type: chartType,
-          title: title,
-          description: '',
-        }),
+        body: JSON.stringify({ chart_type: chartType, title, description: '' }),
       })
-    } catch {
-      // Silently fail — the pin UI already shows success
-    }
+    } catch { /* silently fail */ }
   }
 
   const inferChartType = (spec: Record<string, unknown>): string => {
     const title = ((spec.title as string) || '').toLowerCase()
     const mark = spec.mark as Record<string, unknown> | string | undefined
     const markType = typeof mark === 'string' ? mark : mark?.type
-
     if (title.includes('allocation') || title.includes('balance')) return 'allocation_bar'
-    if (title.includes('contribution') || title.includes('progress') || title.includes('limit')) return 'contribution_progress'
+    if (title.includes('contribution') || title.includes('progress')) return 'contribution_progress'
     if (title.includes('trend') || title.includes('monthly')) return 'monthly_trend'
     if (title.includes('heatmap') || title.includes('location')) return 'asset_location_heatmap'
     if (title.includes('efficiency') || (markType === 'arc' && title.includes('tax'))) return 'tax_efficiency_donut'
-    if (title.includes('treemap') || title.includes('breakdown') && markType === 'circle') return 'account_breakdown_treemap'
     if (title.includes('drift')) return 'drift_bar'
     if (title.includes('holding') || title.includes('portfolio')) return 'holdings_pie'
     if (title.includes('waterfall') || title.includes('flow')) return 'cash_flow_waterfall'
     if (markType === 'arc') return 'tax_efficiency_donut'
-    if (markType === 'area') return 'monthly_trend'
     return 'allocation_bar'
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage(input)
-    }
   }
 
   return (
@@ -165,12 +100,7 @@ export const ChatPanel: React.FC = () => {
       <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between space-y-0 pb-3">
         <div className="flex items-center gap-2">
           <CardTitle className="text-lg">Financial Advisor</CardTitle>
-          <div
-            className={`w-2 h-2 rounded-full ${
-              isConnected === true ? 'bg-emerald-500' : isConnected === false ? 'bg-red-500' : 'bg-amber-500'
-            }`}
-            title={isConnected === true ? 'Connected' : isConnected === false ? 'Disconnected' : 'Checking...'}
-          />
+          <div className="w-2 h-2 rounded-full bg-emerald-500" title="Connected" />
         </div>
         <button
           onClick={resetChat}
@@ -182,57 +112,62 @@ export const ChatPanel: React.FC = () => {
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 space-y-4">
-          {messages.map((msg) => (
-            <div key={msg.id} className="space-y-2">
-              <div className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.role === 'agent' && (
-                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary flex items-center justify-center">
-                    <Bot className="h-4 w-4 text-primary-foreground" />
+        <div className="flex-1 overflow-y-auto px-6 space-y-4 pt-2">
+          {messages.map((msg) => {
+            const text = messageText(msg)
+            const { clean, specs } = msg.role === 'assistant'
+              ? extractVisualizations(text)
+              : { clean: text, specs: [] }
+
+            return (
+              <div key={msg.id} className="space-y-2">
+                <div className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {msg.role === 'assistant' && (
+                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary flex items-center justify-center">
+                      <Bot className="h-4 w-4 text-primary-foreground" />
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                      msg.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary text-secondary-foreground'
+                    }`}
+                  >
+                    {msg.role === 'user' ? (
+                      <span className="leading-relaxed">{clean}</span>
+                    ) : (
+                      <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed
+                        [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
+                        [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
+                        [&_ul]:my-1 [&_ul]:pl-4 [&_li]:my-0.5
+                        [&_p]:my-1 [&_strong]:font-semibold">
+                        <Markdown>{clean}</Markdown>
+                      </div>
+                    )}
                   </div>
-                )}
-                <div
-                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                    msg.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary text-secondary-foreground'
-                  }`}
-                >
-                  {msg.role === 'user' ? (
-                    <span className="leading-relaxed">{msg.content}</span>
-                  ) : (
-                    <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed
-                      [&>*:first-child]:mt-0 [&>*:last-child]:mb-0
-                      [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
-                      [&_ul]:my-1 [&_ul]:pl-4 [&_li]:my-0.5
-                      [&_p]:my-1 [&_strong]:font-semibold">
-                      <Markdown>{msg.content}</Markdown>
+                  {msg.role === 'user' && (
+                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
+                      <User className="h-4 w-4 text-muted-foreground" />
                     </div>
                   )}
                 </div>
-                {msg.role === 'user' && (
-                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center">
-                    <User className="h-4 w-4 text-muted-foreground" />
+
+                {specs.length > 0 && (
+                  <div className="ml-10 space-y-2">
+                    {specs.map((spec, idx) => (
+                      <VegaChart
+                        key={`${msg.id}-viz-${idx}`}
+                        spec={spec}
+                        showPin={true}
+                        onPin={handlePinChart}
+                      />
+                    ))}
                   </div>
                 )}
               </div>
-
-              {/* Render visualizations inline below the message */}
-              {msg.visualizations && msg.visualizations.length > 0 && (
-                <div className="ml-10 space-y-2">
-                  {msg.visualizations.map((spec, idx) => (
-                    <VegaChart
-                      key={`${msg.id}-viz-${idx}`}
-                      spec={spec}
-                      showPin={true}
-                      onPin={(pinnedSpec) => handlePinChart(pinnedSpec)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+            )
+          })}
 
           {isLoading && (
             <div className="flex gap-3 justify-start">
@@ -244,11 +179,8 @@ export const ChatPanel: React.FC = () => {
               </div>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
 
-        {/* Suggested questions (only show when few messages) */}
         {messages.length <= 1 && (
           <div className="flex-shrink-0 px-6 py-3 border-t">
             <p className="text-xs text-muted-foreground mb-2">Try asking:</p>
@@ -256,7 +188,7 @@ export const ChatPanel: React.FC = () => {
               {SUGGESTED_QUESTIONS.map((q) => (
                 <button
                   key={q}
-                  onClick={() => sendMessage(q)}
+                  onClick={() => submit(q)}
                   disabled={isLoading}
                   className="text-xs px-2.5 py-1 rounded-full border hover:bg-secondary transition-colors disabled:opacity-50"
                 >
@@ -267,27 +199,24 @@ export const ChatPanel: React.FC = () => {
           </div>
         )}
 
-        {/* Input */}
         <div className="flex-shrink-0 border-t px-4 py-3">
-          <div className="flex items-center gap-2">
+          <form onSubmit={handleFormSubmit} className="flex items-center gap-2">
             <input
-              ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
               placeholder="Ask about your finances..."
               disabled={isLoading}
               className="flex-1 bg-secondary rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
             <button
-              onClick={() => sendMessage(input)}
+              type="submit"
               disabled={!input.trim() || isLoading}
               className="p-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               <Send className="h-4 w-4" />
             </button>
-          </div>
+          </form>
         </div>
       </CardContent>
     </Card>

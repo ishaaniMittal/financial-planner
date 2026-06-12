@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { VegaChart } from '@/components/VegaChart'
@@ -12,7 +14,7 @@ interface ReportItem {
   position: number
 }
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = ''
 
 export const ReportDashboard: React.FC = () => {
   const [items, setItems] = useState<ReportItem[]>([])

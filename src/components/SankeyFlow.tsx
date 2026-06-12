@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useMemo } from 'react'
 import { CashFlowData } from '@/data/cashflow'
 import { formatCurrency } from '@/lib/utils'

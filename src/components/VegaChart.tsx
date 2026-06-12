@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useEffect, useRef, useState } from 'react'
 import embed from 'vega-embed'
 import { Pin, Check } from 'lucide-react'
