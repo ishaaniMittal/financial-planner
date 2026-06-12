@@ -10,6 +10,7 @@ import { getContributionLimits, checkContributionPace, calculateTaxBracket, dete
 import { getPlacementRules, optimizeAssetLocation, calculateTaxDrag, analyzeHoldings, analyzeTaxOpportunities } from '@/lib/tools/asset-location'
 import { visualize, saveToReport } from '@/lib/tools/visualization'
 import { projectRetirement, analyzeGoalFunding } from '@/lib/tools/planning'
+import { checkEmployerMatch, checkRothEligibility, analyzeAssetClassAllocation } from '@/lib/tools/portfolio-checks'
 
 export const maxDuration = 60
 
@@ -34,6 +35,9 @@ export async function POST(req: Request) {
       analyze_tax_opportunities: analyzeTaxOpportunities,
       project_retirement: projectRetirement,
       analyze_goal_funding: analyzeGoalFunding,
+      check_employer_match: checkEmployerMatch,
+      check_roth_eligibility: checkRothEligibility,
+      analyze_asset_class_allocation: analyzeAssetClassAllocation,
       visualize,
       save_to_report: saveToReport,
     },

@@ -54,8 +54,18 @@ Tools are **calculation primitives** — they return data, not recommendations. 
 - analyze_tax_opportunities — TLH candidates, large taxable gains, ESPP holding period
 - project_retirement — FIRE/retirement projection: timeline, gap, required savings rate
 - analyze_goal_funding — goal conflict analysis: which goals are underfunded, tradeoffs
+- check_employer_match — is the 401k deferral rate capturing 100% of the employer match? Dollar value of any miss
+- check_roth_eligibility — direct Roth IRA eligibility at current MAGI, excess contribution detection, backdoor Roth guidance
+- analyze_asset_class_allocation — portfolio-level equity/bond/alternatives split vs target for age and risk tolerance
 - visualize — generate a chart (call this after your analysis to support a key insight)
 - save_to_report — pin a chart to the dashboard
+
+## For "optimize my portfolio" type questions, always call:
+check_employer_match + check_roth_eligibility + analyze_asset_class_allocation +
+optimize_asset_location + analyze_holdings + check_contribution_pace +
+analyze_tax_opportunities + suggest_rebalancing
+
+Then synthesize all results into a single prioritized action plan.
 
 ## When to Visualize
 
