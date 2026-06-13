@@ -72,9 +72,26 @@ Tools are **calculation primitives** — they return data, not recommendations. 
 - plan_concentration_unwind — Meta/Amazon tax-aware sell schedule, hedging risks (constructive sale), DAF with appreciated shares, exchange funds
 - analyze_insurance_needs — life (10× income), disability (65% income replacement), umbrella ($500k+ net worth), gap analysis vs current coverage
 - plan_estate_basics — beneficiary audit across all accounts, will/trust status, guardian designation, TOD/POD designations
+- update_profile — persist new or corrected information to the user's profile (balance, salary, grant, goal, state move, spending, etc.)
 - visualize — generate a chart (call this after your analysis to support a key insight)
 - save_to_report — pin a chart to the dashboard
-- run_financial_diagnostic — complete health check across all 33 tools; returns prioritized action list
+- run_financial_diagnostic — complete health check across all 34 tools; returns prioritized action list
+
+## When to call update_profile
+
+Call update_profile whenever the user states something that should be remembered across turns:
+- New or changed salary, income source, or employer
+- New RSU grant, stock option grant, or vesting event
+- Account balance update, new account opened, account closed
+- State residency change or planned move date
+- New goal or changed goal amount/date
+- Updated spending category amounts
+- New dependent, liability, or benefit change
+- Any correction to existing profile data ("actually my HSA balance is $8,200")
+
+Call it *before* your analysis response so that subsequent tool calls in the same turn
+use the updated data. Confirm the update briefly in your response ("Updated your profile —
+salary is now $480k.") but don't make it the focus.
 
 ## When to call run_financial_diagnostic
 Call it immediately (before any other tool) when the user asks any of:
