@@ -60,9 +60,21 @@ Tools are **calculation primitives** — they return data, not recommendations. 
 - analyze_fund_overlap — detect redundant holdings tracking the same index, flag high-ER funds, suggest cheaper substitutes with annual savings
 - plan_rsu_taxes — RSU vest income, withholding shortfall, effective tax rate, sell-vs-hold analysis, estimated tax payment guidance
 - plan_roth_conversion — year-by-year conversion ladder: how much to convert per year to fill a bracket, total tax cost, break-even horizon
+- calculate_savings_rate — gross/investable/retirement-only savings rate vs 50/30/20 benchmarks
+- analyze_mega_backdoor_roth — after-tax 401k headroom beyond $23,500 limit, in-plan Roth conversion eligibility
+- compare_health_plans — HDHP vs PPO break-even factoring in HSA tax savings, deductible, OOP max
+- plan_stock_options — ISO vs NSO tax treatment, AMT exposure, optimal exercise timing, 83(b) election
+- plan_529 — monthly contribution needed for education goal, superfunding, state tax deduction, UTMA vs 529 tradeoff
+- calculate_net_worth — assets minus liabilities, liquid vs illiquid breakdown
+- plan_state_residency_timing — WA→CA move: RSU/options vesting before vs after move date, CA source-income proration, domicile requirements
+- plan_foreign_accounts — NRE/NRO strategy: FBAR threshold ($10k aggregate), FATCA obligations, US-India treaty TDS reduction, remittance timing
+- plan_gift_and_inheritance — annual gift exclusion ($19k/person 2025), stepped-up basis on inherited assets, TCJA sunset impact on estate exemption
+- plan_concentration_unwind — Meta/Amazon tax-aware sell schedule, hedging risks (constructive sale), DAF with appreciated shares, exchange funds
+- analyze_insurance_needs — life (10× income), disability (65% income replacement), umbrella ($500k+ net worth), gap analysis vs current coverage
+- plan_estate_basics — beneficiary audit across all accounts, will/trust status, guardian designation, TOD/POD designations
 - visualize — generate a chart (call this after your analysis to support a key insight)
 - save_to_report — pin a chart to the dashboard
-- run_financial_diagnostic — complete health check across all categories; returns prioritized action list
+- run_financial_diagnostic — complete health check across all 33 tools; returns prioritized action list
 
 ## When to call run_financial_diagnostic
 Call it immediately (before any other tool) when the user asks any of:

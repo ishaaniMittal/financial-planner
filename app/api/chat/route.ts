@@ -27,6 +27,25 @@ export async function POST(req: Request) {
     model: anthropic('claude-sonnet-4-6'),
     system: SYSTEM_PROMPT,
     messages: modelMessages,
+    providerOptions: {
+      anthropic: {
+        // Cache system prompt + tool schemas across requests in the same 5-min window.
+        // First request pays 1.25x write cost; subsequent requests pay 0.1x read cost.
+        // Net effect: ~85% token cost reduction on the static parts every turn after the first.
+        cacheControl: { type: 'ephemeral' },
+        // As conversations grow, old tool results accumulate as input tokens.
+        // The diagnostic alone returns thousands of tokens — we don't need that verbatim
+        // in context 10 turns later. This setting prunes tool result blocks automatically,
+        // keeping only the 3 most recent tool exchanges, once 10 total tool uses have occurred.
+        contextManagement: {
+          edits: [{
+            type: 'clear_tool_uses_20250919',
+            trigger: { type: 'tool_uses', value: 10 },
+            keep: { type: 'tool_uses', value: 3 },
+          }],
+        },
+      },
+    },
     tools: {
       get_contribution_limits: getContributionLimits,
       check_contribution_pace: checkContributionPace,

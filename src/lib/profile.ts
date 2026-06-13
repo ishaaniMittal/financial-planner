@@ -155,9 +155,26 @@ export interface FinancialProfile {
 
 const PROFILE_PATH = path.join(process.cwd(), 'profile.json')
 
+// In-memory cache: eliminates repeated fs.readFileSync calls when many tools
+// run in parallel (e.g. all 21 diagnostic tools run simultaneously).
+// 5-second TTL so edits to profile.json are picked up promptly in dev.
+let _profileCache: FinancialProfile | null = null
+let _profileCacheAt = 0
+const PROFILE_CACHE_TTL_MS = 5_000
+
 export function loadProfile(): FinancialProfile {
+  const now = Date.now()
+  if (_profileCache && now - _profileCacheAt < PROFILE_CACHE_TTL_MS) {
+    return _profileCache
+  }
   const raw = fs.readFileSync(PROFILE_PATH, 'utf-8')
-  return JSON.parse(raw) as FinancialProfile
+  _profileCache = JSON.parse(raw) as FinancialProfile
+  _profileCacheAt = now
+  return _profileCache
+}
+
+export function invalidateProfileCache(): void {
+  _profileCache = null
 }
 
 export function totalBalance(profile: FinancialProfile): number {
