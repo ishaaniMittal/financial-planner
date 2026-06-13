@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Cash Flow Visualizer',
-  description: 'AI-powered financial planning dashboard',
+  title: 'Meridian',
+  description: 'Your personal financial planning agent',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

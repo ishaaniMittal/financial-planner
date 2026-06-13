@@ -4,24 +4,38 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* Meridian warm dark palette — always dark, no light mode */
+    --background:      52 18% 8%;
+    --foreground:      40 25% 92%;
+
+    --card:            52 14% 12%;
+    --card-foreground: 40 25% 92%;
+    --card-hover:      52 14% 15%;
+
+    --primary:         42 72% 54%;
+    --primary-foreground: 52 18% 8%;
+
+    --secondary:       52 12% 18%;
+    --secondary-foreground: 40 15% 70%;
+
+    --muted:           52 12% 16%;
+    --muted-foreground: 40 8% 52%;
+
+    --accent:          42 72% 54%;
+    --accent-foreground: 52 18% 8%;
+
+    --destructive:     0 72% 51%;
+    --destructive-foreground: 40 25% 92%;
+
+    --border:          52 10% 17%;
+    --input:           52 10% 17%;
+    --ring:            42 72% 54%;
+
+    --radius: 0.625rem;
+
+    --status-green:  142 38% 38%;
+    --status-amber:  38 72% 46%;
+    --status-red:    0 62% 48%;
   }
 }
 
@@ -29,8 +43,42 @@
   * {
     @apply border-border;
   }
+
+  html {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer utilities {
+  .label-caps {
+    @apply text-xs font-medium tracking-widest uppercase text-muted-foreground;
+    letter-spacing: 0.12em;
+  }
+
+  .hero-number {
+    @apply text-5xl font-bold tracking-tight tabular;
+  }
+
+  .dot-green  { background-color: hsl(var(--status-green)); }
+  .dot-amber  { background-color: hsl(var(--status-amber)); }
+  .dot-red    { background-color: hsl(var(--status-red)); }
+
+  .text-gold { color: hsl(var(--accent)); }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 }

@@ -18,6 +18,7 @@ export default {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        gold: "hsl(var(--accent))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
@@ -40,7 +41,13 @@ export default {
         },
         card: {
           DEFAULT: "hsl(var(--card))",
+          hover: "hsl(var(--card-hover))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        status: {
+          green: "hsl(var(--status-green))",
+          amber: "hsl(var(--status-amber))",
+          red:   "hsl(var(--status-red))",
         },
       },
       borderRadius: {
