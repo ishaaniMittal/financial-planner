@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       visualize,
       save_to_report: saveToReport,
     },
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(25),
   })
 
   return result.toUIMessageStreamResponse()
